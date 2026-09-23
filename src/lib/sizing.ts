@@ -9,6 +9,17 @@ import {
   type PalletFit,
 } from "./euro-pallet";
 import {
+  enumerateLayouts,
+  spanWithOverlap as spanWithOverlapLayout,
+  type LayoutCandidate,
+  type RotateMode,
+} from "./layout-enumerate";
+import {
+  checkTechAccess,
+  type ProductionRoute,
+  type TechAccessResult,
+} from "./tech-access";
+import {
   checkAllModels,
   type ComplianceResult,
   type SalesModel,
@@ -16,7 +27,12 @@ import {
 
 export type ProductShape = "rect" | "cylinder" | "flat_stack";
 
+/** Плоский товар: аккуратная стопка или россыпь/слойная укладка. */
+export type FlatLayout = "neat_stack" | "loose_bulk";
+
 export type PackingMode = "tight" | "standard" | "bubble" | "fragile";
+
+export type { LayoutCandidate, RotateMode };
 
 export interface ProductInput {
   shape: ProductShape;
@@ -24,13 +40,48 @@ export interface ProductInput {
   lengthMm: number;
   /** Для rect / flat_stack: ширина, мм */
   widthMm: number;
-  /** Для rect: высота; для flat_stack: толщина одного пакетика; для cylinder: высота */
+  /** Для rect: высота; для flat_stack: толщина одного; для cylinder: высота */
   heightMm: number;
   /** Для cylinder: диаметр, мм */
   diameterMm?: number;
   quantity: number;
   weightKg?: number | null;
   packing: PackingMode;
+  /** Только flat_stack: стопка или врассыпную / слоями */
+  flatLayout?: FlatLayout;
+  /**
+   * Занимаемый объём, л — вторичная проверка (россыпь «вспухает»).
+   * Не задаёт размер коробки сам по себе.
+   */
+  occupiedVolumeLiters?: number | null;
+  /** Разрешить небольшое наложение единиц в плоскости (сжимает габарит). */
+  allowOverlap?: boolean;
+  /** Нахлёст на стык, мм (пример: 2×105 → 210 без, ~190–195 при 15 мм). */
+  overlapMm?: number;
+  /**
+   * Поворот единицы относительно канона Д×Ш×В / Ø×H.
+   * none — только канон; planar — Д↔Ш; full — любые оси (цилиндр на бок).
+   */
+  rotateMode?: RotateMode;
+  /** Допуск совпадения длины brick-рядов, мм */
+  rowMatchTolMm?: number;
+  /** Шаг округления внутренней коробки вверх, мм */
+  roundStepMm?: number;
+  /** Макс. число стопок/групп в плоскости (1…N) */
+  maxGroups?: number;
+  /** Soft boost в score для этих groupCount (обычно 2…6) */
+  preferredGroupCounts?: number[];
+  /** Зазор между стопками в плоскости, мм */
+  interStackGapMm?: number;
+  /** Отсев слишком высоких столбиков, мм */
+  maxStackHeightMm?: number | null;
+  /** Толщина стенки (паллет по outer = inner + 2×wall); v1 обычно 0 */
+  wallThicknessMm?: number;
+  /**
+   * Каталог/custom считать от этой укладки (id из layouts).
+   * По умолчанию — эталон.
+   */
+  selectedLayoutId?: string | null;
 }
 
 export interface Dims {
@@ -39,11 +90,37 @@ export interface Dims {
   heightMm: number;
 }
 
+/** Результат раскладки плоских единиц в сетку. */
+export interface FlatPackInfo {
+  nx: number;
+  ny: number;
+  nz: number;
+  unitLengthMm: number;
+  unitWidthMm: number;
+  thicknessMm: number;
+  overlapEnabled: boolean;
+  overlapMm: number;
+  spanXMm: number;
+  spanYMm: number;
+  spanZMm: number;
+  geomVolumeLiters: number;
+  /** Высота раздута под заявленный объём россыпи */
+  bulkInflated: boolean;
+}
+
+type FitContext =
+  | { mode: "geom"; required: Dims }
+  | {
+      mode: "volume";
+      requiredVolMm3: number;
+      faceLengthMm: number;
+      faceWidthMm: number;
+      required: Dims;
+    };
+
 export interface FitScore {
   fits: boolean;
-  /** Ориентация коробки относительно товара */
   orientation: Dims;
-  /** Зазоры по осям после ориентации, мм */
   gaps: Dims;
   unusedVolumeRatio: number;
   maxGapMm: number;
@@ -56,7 +133,10 @@ export interface BoxRecommendation {
   fit: FitScore;
   compliance: ComplianceResult[];
   pallet: PalletFit;
+  tech: TechAccessResult;
+  productionRoute: ProductionRoute;
   isBest: boolean;
+  isBestTech: boolean;
   warnings: string[];
 }
 
@@ -64,12 +144,25 @@ export interface SizingResult {
   productBlock: Dims;
   requiredInner: Dims;
   clearanceMm: number;
+  /** Геометрический или заявленный объём для справки, л */
+  occupiedVolumeLiters: number;
+  /** Детали сетки (только flat_stack, legacy) */
+  flatPack: FlatPackInfo | null;
+  /** Все уникальные кандидаты укладки */
+  layouts: LayoutCandidate[];
+  /** Эталон: 1 стопка / 1 группа в каноне (предпочтительно) */
+  etalon: LayoutCandidate;
+  /** Оптимальные: паллет ≥90%, отсортированы по score */
+  optimal: LayoutCandidate[];
+  /** Укладка, от которой посчитаны catalog/custom */
+  selectedLayout: LayoutCandidate;
   recommendations: BoxRecommendation[];
   custom: BoxRecommendation;
+  customTech: BoxRecommendation | null;
   notes: string[];
   markingHint: string | null;
-  /** Пример: почему 300×300×80 отвергают при паллетировании */
   palletHint: string | null;
+  techHint: string;
 }
 
 /** Зазор на сторону (мм) по режиму упаковки. */
@@ -86,7 +179,171 @@ export function clearanceForPacking(mode: PackingMode): number {
   }
 }
 
-/** Габаритный блок товара (без зазора) — прямоугольный параллелепипед. */
+export function volumeLiters(dims: Dims): number {
+  return (dims.lengthMm * dims.widthMm * dims.heightMm) / 1_000_000;
+}
+
+/**
+ * Длина ряда с возможным наложением.
+ * count=2, unit=105, overlap=15 → 105+90=195 (без overlap → 210).
+ */
+export function spanWithOverlap(
+  unitMm: number,
+  count: number,
+  overlapMm: number,
+): number {
+  return spanWithOverlapLayout(unitMm, count, overlapMm);
+}
+
+/**
+ * Лучшая слойная сетка плоских единиц: оси первичны, объём вторичен.
+ * При заявленном occupiedVolumeLiters высота может чуть раздуться (вспухание россыпи),
+ * не ломая footprint по L×W укладки.
+ */
+export function bestLooseFlatPack(
+  lengthMm: number,
+  widthMm: number,
+  thicknessMm: number,
+  quantity: number,
+  overlapMm: number,
+  occupiedVolumeLiters?: number | null,
+): FlatPackInfo {
+  const qty = Math.max(1, Math.floor(quantity));
+  const t = Math.max(0.1, thicknessMm);
+  const overlap = Math.max(0, overlapMm);
+
+  type Cand = FlatPackInfo & { score: number };
+  const cands: Cand[] = [];
+
+  for (let nx = 1; nx <= qty; nx++) {
+    for (let ny = 1; ny <= Math.ceil(qty / nx); ny++) {
+      const nz = Math.ceil(qty / (nx * ny));
+      if (nx * ny * nz < qty) continue;
+
+      for (const [uL, uW] of [
+        [lengthMm, widthMm],
+        [widthMm, lengthMm],
+      ] as [number, number][]) {
+        const spanX = spanWithOverlap(uL, nx, overlap);
+        const spanY = spanWithOverlap(uW, ny, overlap);
+        const spanZ = t * nz;
+        const geomVol = (spanX * spanY * spanZ) / 1_000_000;
+        const bulkInflated =
+          occupiedVolumeLiters != null &&
+          occupiedVolumeLiters > geomVol + 0.15;
+
+        // Первично: компактный блок по осям. Объём россыпи не раздувает габарит.
+        const aspect =
+          Math.max(spanX, spanY, spanZ) / Math.max(1, Math.min(spanX, spanY, spanZ));
+        const score =
+          geomVol * 1000 +
+          aspect * 8 +
+          Math.max(spanX, spanY, spanZ) * 0.05 +
+          nz * 0.3;
+
+        cands.push({
+          nx,
+          ny,
+          nz,
+          unitLengthMm: uL,
+          unitWidthMm: uW,
+          thicknessMm: t,
+          overlapEnabled: overlap > 0,
+          overlapMm: overlap,
+          spanXMm: spanX,
+          spanYMm: spanY,
+          spanZMm: spanZ,
+          geomVolumeLiters: geomVol,
+          bulkInflated,
+          score,
+        });
+      }
+    }
+  }
+
+  cands.sort((a, b) => a.score - b.score);
+  const best = cands[0]!;
+  return {
+    nx: best.nx,
+    ny: best.ny,
+    nz: best.nz,
+    unitLengthMm: best.unitLengthMm,
+    unitWidthMm: best.unitWidthMm,
+    thicknessMm: best.thicknessMm,
+    overlapEnabled: best.overlapEnabled,
+    overlapMm: best.overlapMm,
+    spanXMm: Math.round(best.spanXMm * 10) / 10,
+    spanYMm: Math.round(best.spanYMm * 10) / 10,
+    spanZMm: Math.round(best.spanZMm * 10) / 10,
+    geomVolumeLiters: best.geomVolumeLiters,
+    bulkInflated: best.bulkInflated,
+  };
+}
+
+/** @deprecated объём больше не задаёт габарит сам; оставлен для справки/миграции. */
+export function dimsFromOccupiedVolume(
+  faceLengthMm: number,
+  faceWidthMm: number,
+  volumeLitersValue: number,
+): Dims {
+  const pack = bestLooseFlatPack(
+    faceLengthMm,
+    faceWidthMm,
+    1.5,
+    100,
+    0,
+    volumeLitersValue,
+  );
+  return {
+    lengthMm: pack.spanXMm,
+    widthMm: pack.spanYMm,
+    heightMm: pack.spanZMm,
+  };
+}
+
+export function resolveFlatPack(input: ProductInput): FlatPackInfo | null {
+  if (input.shape !== "flat_stack") return null;
+  const qty = Math.max(1, Math.floor(input.quantity) || 1);
+  const layout = input.flatLayout ?? "neat_stack";
+
+  if (layout === "neat_stack") {
+    return {
+      nx: 1,
+      ny: 1,
+      nz: qty,
+      unitLengthMm: input.lengthMm,
+      unitWidthMm: input.widthMm,
+      thicknessMm: input.heightMm,
+      overlapEnabled: false,
+      overlapMm: 0,
+      spanXMm: input.lengthMm,
+      spanYMm: input.widthMm,
+      spanZMm: input.heightMm * qty,
+      geomVolumeLiters: volumeLiters({
+        lengthMm: input.lengthMm,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm * qty,
+      }),
+      bulkInflated: false,
+    };
+  }
+
+  const overlap =
+    input.allowOverlap && (input.overlapMm ?? 0) > 0
+      ? input.overlapMm ?? 0
+      : 0;
+
+  return bestLooseFlatPack(
+    input.lengthMm,
+    input.widthMm,
+    input.heightMm,
+    qty,
+    overlap,
+    input.occupiedVolumeLiters,
+  );
+}
+
+/** Габаритный блок товара (без зазора). */
 export function productBoundingBox(input: ProductInput): Dims {
   const qty = Math.max(1, Math.floor(input.quantity) || 1);
 
@@ -96,7 +353,6 @@ export function productBoundingBox(input: ProductInput): Dims {
     if (qty === 1) {
       return { lengthMm: d, widthMm: d, heightMm: h };
     }
-    // Несколько цилиндров: сетка в плоскости основания (квадратная укладка)
     const cols = Math.ceil(Math.sqrt(qty));
     const rows = Math.ceil(qty / cols);
     return {
@@ -107,16 +363,14 @@ export function productBoundingBox(input: ProductInput): Dims {
   }
 
   if (input.shape === "flat_stack") {
-    // Плоские пакетики сложены друг на друга врассыпную
-    const thickness = input.heightMm;
+    const pack = resolveFlatPack(input)!;
     return {
-      lengthMm: input.lengthMm,
-      widthMm: input.widthMm,
-      heightMm: thickness * qty,
+      lengthMm: pack.spanXMm,
+      widthMm: pack.spanYMm,
+      heightMm: pack.spanZMm,
     };
   }
 
-  // rect — штучный прямоугольный товар; qty>1 → оптимальная сетка
   if (qty === 1) {
     return {
       lengthMm: input.lengthMm,
@@ -141,13 +395,6 @@ function bestRectGrid(l: number, w: number, h: number, qty: number): Dims {
     for (let ny = 1; ny <= Math.ceil(qty / nx); ny++) {
       const nz = Math.ceil(qty / (nx * ny));
       if (nx * ny * nz < qty) continue;
-      const dims = sortedDims(nx * l, ny * w, nz * h);
-      const vol = dims[0] * dims[1] * dims[2];
-      if (vol < bestVol) {
-        bestVol = vol;
-        best = { lengthMm: dims[0], widthMm: dims[1], heightMm: dims[2] };
-      }
-      // перестановки осей единицы
       for (const [a, b, c] of permute3(l, w, h)) {
         const d2 = sortedDims(nx * a, ny * b, nz * c);
         const v2 = d2[0] * d2[1] * d2[2];
@@ -182,7 +429,6 @@ export function addClearance(block: Dims, clearanceMm: number): Dims {
   };
 }
 
-/** Округлить вверх до шага (по умолчанию 5 мм) — оси как у товара. */
 export function roundUpCustom(required: Dims, step = 5): Dims {
   const up = (n: number) => Math.ceil(n / step) * step;
   return {
@@ -196,10 +442,11 @@ export function tryFit(box: Dims, required: Dims): FitScore | null {
   let best: FitScore | null = null;
 
   for (const [bl, bw, bh] of permute3(box.lengthMm, box.widthMm, box.heightMm)) {
-    const [rl, rw, rh] = [required.lengthMm, required.widthMm, required.heightMm];
-    // required уже «нужный минимум»; сравниваем с ориентацией коробки
-    // Перебираем ориентации required относительно box
-    for (const [x, y, z] of permute3(rl, rw, rh)) {
+    for (const [x, y, z] of permute3(
+      required.lengthMm,
+      required.widthMm,
+      required.heightMm,
+    )) {
       if (bl >= x && bw >= y && bh >= z) {
         const gaps = {
           lengthMm: bl - x,
@@ -210,9 +457,11 @@ export function tryFit(box: Dims, required: Dims): FitScore | null {
         const reqVol = x * y * z;
         const unusedVolumeRatio = boxVol > 0 ? (boxVol - reqVol) / boxVol : 1;
         const maxGapMm = Math.max(gaps.lengthMm, gaps.widthMm, gaps.heightMm);
-        // Меньше пустот и меньше объём — лучше; штраф за огромные зазоры
         const score =
-          boxVol + unusedVolumeRatio * 50_000 + maxGapMm * 100 + (gaps.lengthMm + gaps.widthMm + gaps.heightMm);
+          boxVol +
+          unusedVolumeRatio * 50_000 +
+          maxGapMm * 100 +
+          (gaps.lengthMm + gaps.widthMm + gaps.heightMm);
 
         const candidate: FitScore = {
           fits: true,
@@ -230,10 +479,48 @@ export function tryFit(box: Dims, required: Dims): FitScore | null {
   return best;
 }
 
+/**
+ * Для врассыпную: коробка подходит, если объём ≥ нужного и
+ * хотя бы одна грань принимает лицо единицы (L×W пакетика).
+ */
+export function tryFitVolume(
+  box: Dims,
+  requiredVolMm3: number,
+  faceLengthMm: number,
+  faceWidthMm: number,
+): FitScore | null {
+  const boxVol = box.lengthMm * box.widthMm * box.heightMm;
+  if (boxVol + 1 < requiredVolMm3) return null;
+
+  let orientation: Dims | null = null;
+  for (const [a, b, c] of permute3(box.lengthMm, box.widthMm, box.heightMm)) {
+    if (
+      (a >= faceLengthMm && b >= faceWidthMm) ||
+      (a >= faceWidthMm && b >= faceLengthMm)
+    ) {
+      orientation = { lengthMm: a, widthMm: b, heightMm: c };
+      break;
+    }
+  }
+  if (!orientation) return null;
+
+  const unusedVolumeRatio = (boxVol - requiredVolMm3) / boxVol;
+  const score = boxVol + unusedVolumeRatio * 50_000;
+  return {
+    fits: true,
+    orientation,
+    gaps: { lengthMm: 0, widthMm: 0, heightMm: 0 },
+    unusedVolumeRatio,
+    maxGapMm: 0,
+    score,
+  };
+}
+
 function buildWarnings(
   fit: FitScore,
   compliance: ComplianceResult[],
   pallet: PalletFit,
+  tech: TechAccessResult,
 ): string[] {
   const warnings: string[] = [];
   if (fit.unusedVolumeRatio > 0.45 || fit.maxGapMm > 40) {
@@ -261,16 +548,73 @@ function buildWarnings(
       `Слабая укладка на европаллет: ${pallet.summary} Типичная причина отказа размера вроде 300×300.`,
     );
   }
+  if (!tech.ok) {
+    warnings.push(tech.messages[0]!);
+  }
   return warnings;
+}
+
+function fitBox(box: Dims, ctx: FitContext): FitScore | null {
+  if (ctx.mode === "volume") {
+    return tryFitVolume(
+      box,
+      ctx.requiredVolMm3,
+      ctx.faceLengthMm,
+      ctx.faceWidthMm,
+    );
+  }
+  return tryFit(box, ctx.required);
+}
+
+/** Индивидуальный размер под объём + техлимиты (если возможно). */
+export function customDimsForTech(
+  ctx: FitContext,
+  occupiedLiters: number,
+): Dims | null {
+  const targetMm3 =
+    ctx.mode === "volume"
+      ? ctx.requiredVolMm3
+      : Math.max(occupiedLiters, volumeLiters(ctx.required)) * 1_000_000;
+  const bases: [number, number][] = [
+    [240, 200],
+    [240, 160],
+    [300, 200],
+    [250, 200],
+    [400, 200],
+    [300, 160],
+  ];
+  const heights = [80, 100, 120, 140, 160, 180, 200, 240];
+  let best: Dims | null = null;
+  let bestScore = Infinity;
+
+  for (const [a, b] of bases) {
+    for (const h of heights) {
+      const dims = { lengthMm: a, widthMm: b, heightMm: h };
+      if (!checkTechAccess(a, b, h).ok) continue;
+      if (a * b * h < targetMm3) continue;
+      if (!fitBox(dims, ctx)) continue;
+      const pallet = bestPalletFit(dims);
+      const waste = (a * b * h - targetMm3) / targetMm3;
+      const score =
+        waste * 10 +
+        (pallet.exact ? 0 : palletIsPractical(pallet) ? 1 : 6) +
+        a * b * h / 1e7;
+      if (score < bestScore) {
+        bestScore = score;
+        best = dims;
+      }
+    }
+  }
+  return best;
 }
 
 function makeRecommendation(
   kind: "catalog" | "custom",
   box: CatalogBox,
-  requiredInner: Dims,
+  ctx: FitContext,
   weight: number | null,
 ): BoxRecommendation | null {
-  const fit = tryFit(box, requiredInner);
+  const fit = fitBox(box, ctx);
   if (!fit) return null;
   const compliance = checkAllModels(
     box.lengthMm,
@@ -279,21 +623,27 @@ function makeRecommendation(
     weight,
   );
   const pallet = bestPalletFit(box);
+  const tech = checkTechAccess(box.lengthMm, box.widthMm, box.heightMm);
   return {
     kind,
     box,
     fit,
     compliance,
     pallet,
+    tech,
+    productionRoute: tech.route,
     isBest: false,
-    warnings: buildWarnings(fit, compliance, pallet),
+    isBestTech: false,
+    warnings: buildWarnings(fit, compliance, pallet, tech),
   };
 }
 
-function rankKey(r: BoxRecommendation): [number, number, number, number] {
+function rankKey(r: BoxRecommendation): [number, number, number, number, number] {
   const modelOk = r.compliance.filter((c) => c.ok).length;
   const palletScore = r.pallet.exact ? 2 : palletIsPractical(r.pallet) ? 1 : 0;
-  return [modelOk, palletScore, r.pallet.coverage, -r.fit.score];
+  // Не отсекаем вне техлимитов — лишь лёгкий бонус слоттеру
+  const techBonus = r.tech.ok ? 0.15 : 0;
+  return [modelOk, palletScore, r.pallet.coverage + techBonus, -r.fit.score, 0];
 }
 
 function compareRecs(a: BoxRecommendation, b: BoxRecommendation): number {
@@ -307,19 +657,86 @@ function compareRecs(a: BoxRecommendation, b: BoxRecommendation): number {
 
 export function recommendBoxes(input: ProductInput): SizingResult {
   const clearanceMm = clearanceForPacking(input.packing);
-  const productBlock = productBoundingBox(input);
-  const requiredInner = addClearance(productBlock, clearanceMm);
+  const enumResult = enumerateLayouts({
+    shape: input.shape,
+    lengthMm: input.lengthMm,
+    widthMm: input.widthMm,
+    heightMm: input.heightMm,
+    diameterMm: input.diameterMm,
+    quantity: input.quantity,
+    packing: input.packing,
+    flatLayout: input.flatLayout,
+    occupiedVolumeLiters: input.occupiedVolumeLiters,
+    allowOverlap: input.allowOverlap,
+    overlapMm: input.overlapMm,
+    rotateMode: input.rotateMode ?? "none",
+    rowMatchTolMm: input.rowMatchTolMm,
+    roundStepMm: input.roundStepMm,
+    maxGroups: input.maxGroups,
+    preferredGroupCounts: input.preferredGroupCounts,
+    interStackGapMm: input.interStackGapMm,
+    maxStackHeightMm: input.maxStackHeightMm,
+    wallThicknessMm: input.wallThicknessMm,
+  });
+
+  const selectedLayout =
+    (input.selectedLayoutId
+      ? enumResult.layouts.find((l) => l.id === input.selectedLayoutId) ??
+        enumResult.optimal.find((l) => l.id === input.selectedLayoutId) ??
+        (enumResult.etalon.id === input.selectedLayoutId
+          ? enumResult.etalon
+          : null)
+      : null) ?? enumResult.etalon;
+
+  const productBlock = selectedLayout.productBlock;
+  const requiredInner = selectedLayout.innerBox;
+  const flatPack = resolveFlatPack(input);
+  const geomLiters = volumeLiters(productBlock);
+  const occupiedVolumeLiters =
+    input.occupiedVolumeLiters != null && input.occupiedVolumeLiters > 0
+      ? input.occupiedVolumeLiters
+      : selectedLayout.productVolumeLiters || geomLiters;
   const weight = input.weightKg ?? null;
   const notes: string[] = [];
 
+  const fitCtx: FitContext = { mode: "geom", required: requiredInner };
+
   if (input.shape === "cylinder") {
     notes.push(
-      "Круглый товар упаковывается в квадратную/прямоугольную коробку по диаметру основания.",
+      "Круглый / цилиндрический товар → квадратная или прямоугольная коробка по диаметру основания.",
+    );
+  }
+  if (input.shape === "rect") {
+    const square =
+      Math.abs(input.lengthMm - input.widthMm) < 0.5 &&
+      Math.abs(input.widthMm - input.heightMm) < 0.5;
+    notes.push(
+      square
+        ? "Кубический / квадратный штучный товар."
+        : "Прямоугольный штучный товар (квадрат — если стороны равны).",
     );
   }
   if (input.shape === "flat_stack") {
+    const layout = input.flatLayout ?? "neat_stack";
     notes.push(
-      `Укладка ${Math.max(1, Math.floor(input.quantity))} плоских единиц: считается блок ${productBlock.lengthMm}×${productBlock.widthMm}×${productBlock.heightMm} мм (можно переориентировать при сборке).`,
+      layout === "neat_stack"
+        ? `Аккуратная стопка: перебор укладок с S=1 (эталон) и сравнением.`
+        : `Слои/россыпь: перебор 1…${input.maxGroups ?? 6} стопок, uniform/brick.`,
+    );
+    if (input.allowOverlap && (input.overlapMm ?? 0) > 0) {
+      notes.push(
+        `Наложение ${input.overlapMm} мм на стык в плоскости укладки.`,
+      );
+    }
+  }
+  notes.push(
+    `Выбрана укладка: ${selectedLayout.summary} → внутр. ${requiredInner.lengthMm}×${requiredInner.widthMm}×${requiredInner.heightMm} мм.`,
+  );
+  if (input.rotateMode && input.rotateMode !== "none") {
+    notes.push(
+      input.rotateMode === "planar"
+        ? "Поворот: только в плоскости (Д↔Ш)."
+        : "Поворот: любой (в т.ч. на бок).",
     );
   }
   if (input.packing === "fragile") {
@@ -330,10 +747,10 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     notes.push("Заложен запас под слой пузырчатой плёнки.");
   }
   notes.push(
-    "Отдельно проверяется укладка на европаллет 1200×800 мм (принимают склады WB).",
+    "Приоритет: укладка → паллет (≥90% в «оптимальных») → пустоты → техдоступ. Эталон (1 стопка) всегда.",
   );
 
-  const customDims = roundUpCustom(requiredInner);
+  const customDims = requiredInner;
   const customBox: CatalogBox = {
     id: "custom",
     lengthMm: customDims.lengthMm,
@@ -341,18 +758,88 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     heightMm: customDims.heightMm,
     label: `${customDims.lengthMm}×${customDims.widthMm}×${customDims.heightMm}`,
   };
-  const custom = makeRecommendation("custom", customBox, requiredInner, weight)!;
+  const custom = makeRecommendation("custom", customBox, fitCtx, weight)!;
+
+  let customTech: BoxRecommendation | null = null;
+  // Tech custom from best optimal (or etalon) that already passes tech, else search
+  const techFromLayouts = [enumResult.etalon, ...enumResult.optimal].find(
+    (l) => l.tech.ok,
+  );
+  if (
+    techFromLayouts &&
+    (techFromLayouts.innerBox.lengthMm !== customDims.lengthMm ||
+      techFromLayouts.innerBox.widthMm !== customDims.widthMm ||
+      techFromLayouts.innerBox.heightMm !== customDims.heightMm)
+  ) {
+    const techBox: CatalogBox = {
+      id: "custom-tech",
+      lengthMm: techFromLayouts.innerBox.lengthMm,
+      widthMm: techFromLayouts.innerBox.widthMm,
+      heightMm: techFromLayouts.innerBox.heightMm,
+      label: `${techFromLayouts.innerBox.lengthMm}×${techFromLayouts.innerBox.widthMm}×${techFromLayouts.innerBox.heightMm}`,
+    };
+    customTech = makeRecommendation(
+      "custom",
+      techBox,
+      { mode: "geom", required: techFromLayouts.innerBox },
+      weight,
+    );
+  } else {
+    const techDims = customDimsForTech(fitCtx, occupiedVolumeLiters);
+    if (
+      techDims &&
+      (techDims.lengthMm !== customDims.lengthMm ||
+        techDims.widthMm !== customDims.widthMm ||
+        techDims.heightMm !== customDims.heightMm)
+    ) {
+      const techBox: CatalogBox = {
+        id: "custom-tech",
+        lengthMm: techDims.lengthMm,
+        widthMm: techDims.widthMm,
+        heightMm: techDims.heightMm,
+        label: `${techDims.lengthMm}×${techDims.widthMm}×${techDims.heightMm}`,
+      };
+      customTech = makeRecommendation("custom", techBox, fitCtx, weight);
+    }
+  }
 
   const catalogFits: BoxRecommendation[] = [];
   for (const box of BOX_CATALOG) {
-    const rec = makeRecommendation("catalog", box, requiredInner, weight);
+    const rec = makeRecommendation("catalog", box, fitCtx, weight);
     if (rec) catalogFits.push(rec);
   }
-
   catalogFits.sort(compareRecs);
 
-  const top = catalogFits.slice(0, 6);
+  const topAll = catalogFits.slice(0, 5);
+  const topTech = catalogFits.filter((r) => r.tech.ok).slice(0, 4);
+  const topDie = catalogFits.filter((r) => !r.tech.ok).slice(0, 3);
+  const merged = new Map<string, BoxRecommendation>();
+  for (const r of [...topAll, ...topTech, ...topDie]) {
+    merged.set(r.box.id, r);
+  }
+  const top = [...merged.values()].sort(compareRecs).slice(0, 8);
   if (top[0]) top[0].isBest = true;
+  const firstTech = top.find((r) => r.tech.ok);
+  if (firstTech) firstTech.isBestTech = true;
+
+  if (
+    input.shape === "flat_stack" &&
+    input.flatLayout === "loose_bulk" &&
+    input.occupiedVolumeLiters != null &&
+    input.occupiedVolumeLiters > 0
+  ) {
+    for (const rec of [custom, customTech, ...top].filter(
+      Boolean,
+    ) as BoxRecommendation[]) {
+      const boxVol =
+        (rec.box.lengthMm * rec.box.widthMm * rec.box.heightMm) / 1_000_000;
+      if (boxVol + 0.05 < input.occupiedVolumeLiters) {
+        rec.warnings.push(
+          `Объём коробки ${boxVol.toFixed(1)} л < заявленной россыпи ${input.occupiedVolumeLiters.toFixed(1)} л — может быть тесно при вспухании.`,
+        );
+      }
+    }
+  }
 
   const faceA = Math.min(
     productBlock.lengthMm,
@@ -377,30 +864,48 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     heightMm: 80,
   });
   const palletHint = !bad300.exact
-    ? `Размер 300×300×80 проходит лимиты стороны/суммы WB, но на европаллете 1200×800 даёт расклад ${bad300.alongLength}×${bad300.alongWidth} с остатком ${bad300.leftoverLengthMm || bad300.leftoverWidthMm} мм (покрытие ${Math.round(bad300.coverage * 100)}%) — поэтому его часто отклоняют при паллетировании.`
+    ? `Пример: 300×300×80 проходит сторону/сумму WB, но на европаллете 1200×800 даёт ${bad300.alongLength}×${bad300.alongWidth} с остатком ${bad300.leftoverLengthMm || bad300.leftoverWidthMm} мм (покрытие ${Math.round(bad300.coverage * 100)}%) — часто отклоняют при паллетировании. В «оптимальных» скрываем покрытие <90%.`
     : null;
+
+  const techHint =
+    "Техлимиты текущего станка: длина ≥ 240 мм, высота ≥ 80 мм, ширина+высота ≥ 280 мм. Подходящие помечены «Техдоступ»; остальные — «Самосбор · штанцформа» (можно заказать вырубной штамп любого размера).";
 
   return {
     productBlock,
     requiredInner,
     clearanceMm,
+    occupiedVolumeLiters,
+    flatPack,
+    layouts: enumResult.layouts,
+    etalon: enumResult.etalon,
+    optimal: enumResult.optimal,
+    selectedLayout,
     recommendations: top,
     custom,
+    customTech,
     notes,
     markingHint,
     palletHint,
+    techHint,
   };
 }
 
+/** Текущий кейс: 100 пакетиков, укладка с наложением; 6,6 л — вторичная проверка. */
 export function presetSachets(): ProductInput {
   return {
     shape: "flat_stack",
+    flatLayout: "loose_bulk",
     lengthMm: 150,
     widthMm: 105,
     heightMm: 1.5,
     quantity: 100,
+    occupiedVolumeLiters: 6.6,
+    allowOverlap: true,
+    overlapMm: 15,
+    rotateMode: "none",
     weightKg: null,
     packing: "standard",
+    preferredGroupCounts: [2, 4],
   };
 }
 
@@ -411,6 +916,30 @@ export function presetCandle(): ProductInput {
     widthMm: 150,
     heightMm: 105,
     diameterMm: 150,
+    quantity: 1,
+    weightKg: null,
+    packing: "standard",
+  };
+}
+
+export function presetRectBox(): ProductInput {
+  return {
+    shape: "rect",
+    lengthMm: 200,
+    widthMm: 120,
+    heightMm: 80,
+    quantity: 1,
+    weightKg: null,
+    packing: "standard",
+  };
+}
+
+export function presetSquare(): ProductInput {
+  return {
+    shape: "rect",
+    lengthMm: 100,
+    widthMm: 100,
+    heightMm: 100,
     quantity: 1,
     weightKg: null,
     packing: "standard",

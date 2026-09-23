@@ -61,8 +61,9 @@ export default function Home() {
             Коробомер
           </h1>
           <p className="animate-rise-delay mt-4 max-w-xl text-base leading-relaxed text-[var(--muted)] sm:text-lg">
-            Подбирает квадратную или прямоугольную коробку под ваш товар и
-            сверяет её с ограничениями Wildberries по весу и габаритам.
+            Подбирает квадратную или прямоугольную коробку под плоский,
+            круглый или прямоугольный товар и сверяет с лимитами Wildberries.
+            Техлимиты станка помечают «Техдоступ» или «Самосбор · штанцформа».
           </p>
         </section>
 
@@ -142,8 +143,31 @@ export default function Home() {
                 </li>
                 <li>
                   Удобные основания делят 1200 и 800 без остатка: 100, 160×100,
-                  200, 400 и т.п. Для 160×120 — расклад 10×5 = 50 шт/слой без
-                  зазоров.
+                  200, 400 и т.п.
+                </li>
+              </ul>
+            </article>
+            <article className="border-t border-[var(--line)] pt-4 md:col-span-2">
+              <h3 className="font-display text-xl font-semibold text-[var(--ink)]">
+                Техлимиты производства и самосбор
+              </h3>
+              <ul className="mt-3 space-y-2 text-sm leading-relaxed text-[var(--muted)]">
+                <li>
+                  Текущий станок: длина ≥{" "}
+                  <strong className="text-[var(--ink)]">240 мм</strong>, высота ≥{" "}
+                  <strong className="text-[var(--ink)]">80 мм</strong>,
+                  ширина+высота ≥{" "}
+                  <strong className="text-[var(--ink)]">280 мм</strong>.
+                </li>
+                <li>
+                  Варианты{" "}
+                  <strong className="text-[var(--ink)]">вне техлимитов не скрываем</strong>{" "}
+                  — их можно сделать самосборной коробкой под заказную
+                  штанцформу.
+                </li>
+                <li>
+                  Плоский товар «врассыпную» считаем по занимаемому объёму
+                  (например 6,6 л), а не только по идеальной стопке.
                 </li>
               </ul>
             </article>
