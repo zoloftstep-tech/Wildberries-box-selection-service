@@ -606,19 +606,42 @@ function GapLine({
 }
 
 function PalletLine({ pallet }: { pallet: BoxRecommendation["pallet"] }) {
+  const good = pallet.exact || (pallet.ok && pallet.coverage >= 0.95);
   return (
-    <p
+    <div
       className={cn(
-        "mt-1 text-xs",
+        "mt-3 rounded-xl border px-3 py-2.5",
         pallet.exact
-          ? "font-medium text-[var(--moss-deep)]"
-          : pallet.ok && pallet.coverage >= 0.95
-            ? "text-[var(--ink)]"
-            : "text-amber-900",
+          ? "border-[var(--moss)]/40 bg-[var(--moss-soft)]"
+          : good
+            ? "border-[var(--line)] bg-white/90"
+            : "border-amber-700/25 bg-amber-50",
       )}
     >
-      {pallet.summary}
-    </p>
+      <p
+        className={cn(
+          "text-[10px] font-semibold uppercase tracking-[0.14em]",
+          good ? "text-[var(--moss-deep)]" : "text-amber-900",
+        )}
+      >
+        Европаллет 1200×800
+      </p>
+      <p
+        className={cn(
+          "mt-1 text-sm leading-snug",
+          good ? "text-[var(--ink)]" : "text-amber-950",
+        )}
+      >
+        {pallet.exact
+          ? `${pallet.alongLength}×${pallet.alongWidth} = ${pallet.countPerLayer} шт/слой без зазоров`
+          : pallet.ok
+            ? `${pallet.alongLength}×${pallet.alongWidth} = ${pallet.countPerLayer} шт/слой · остаток ${pallet.leftoverLengthMm}×${pallet.leftoverWidthMm} мм · ${Math.round(pallet.coverage * 100)}%`
+            : "Не укладывается без свеса"}
+      </p>
+      <p className="mt-0.5 text-xs text-[var(--muted)]">
+        Основание на паллете: {pallet.baseLengthMm}×{pallet.baseWidthMm} мм
+      </p>
+    </div>
   );
 }
 
