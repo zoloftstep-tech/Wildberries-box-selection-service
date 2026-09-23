@@ -1,0 +1,40 @@
+/**
+ * Коробомер design tokens — BoxMart shared Twenty light ops.
+ * Keep in sync with:
+ *   boxmart-crm/design-system/boxmart-crm/tokens.css
+ *   boxcalculator-main/design-system/boxmart-calc/tokens.css
+ *   Boxmart Site/web/src/app/globals.css @theme
+ */
+:root {
+  --color-bg: #f9f9f9;
+  --color-surface: #ffffff;
+  --color-surface-muted: #fcfcfc;
+  --color-border: #ebebeb;
+  --color-border-strong: #d6d6d6;
+  --color-text: #333333;
+  --color-text-muted: #666666;
+  --color-text-inverse: #f8fafc;
+  --color-primary: #1a1a1a;
+  --color-accent: #415ac1;
+  --color-accent-hover: #3449a3;
+  --color-accent-soft: #eef2fd;
+  --color-cta: #333333;
+  --color-cta-hover: #1a1a1a;
+  --color-danger: #b91c1c;
+  --color-warning: #b45309;
+  --color-success: #047857;
+
+  --font-sans: "Fira Sans", system-ui, sans-serif;
+  --font-mono: "Fira Code", ui-monospace, monospace;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 2px 8px rgb(0 0 0 / 0.06);
+  --shadow-lg: 0 8px 24px rgb(0 0 0 / 0.08);
+
+  --tap-min: 44px;
+  --control-h: 40px;
+}

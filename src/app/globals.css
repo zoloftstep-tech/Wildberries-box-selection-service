@@ -4,12 +4,17 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/**
+ * Коробомер — BoxMart shared design tokens
+ * (aligned with CRM / BoxCalc / Site: Twenty light ops)
+ */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-display: var(--font-display);
-  --font-heading: var(--font-display);
+  --font-sans: var(--font-boxmart-sans), system-ui, sans-serif;
+  --font-display: var(--font-boxmart-sans), system-ui, sans-serif;
+  --font-mono: var(--font-boxmart-mono), ui-monospace, monospace;
+  --font-heading: var(--font-boxmart-sans), system-ui, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -30,7 +35,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
+  --color-muted: var(--muted-bg);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
@@ -39,56 +44,73 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
+  --radius-4xl: 28px;
 }
 
 :root {
-  --ink: #152018;
-  --muted: #5d6a60;
-  --panel: #f3f6f1;
-  --line: #d5ddd4;
-  --moss: #3f7a52;
-  --moss-deep: #2b5a3a;
-  --moss-soft: #dce9df;
-  --paper: #e8efe6;
-  --background: #e8efe6;
-  --foreground: #152018;
-  --card: #f3f6f1;
-  --card-foreground: #152018;
-  --popover: #f7faf6;
-  --popover-foreground: #152018;
-  --primary: #2b5a3a;
-  --primary-foreground: #f7faf6;
-  --secondary: #dce9df;
-  --secondary-foreground: #152018;
-  --muted: #5d6a60;
-  --muted-foreground: #5d6a60;
-  --accent: #dce9df;
-  --accent-foreground: #152018;
-  --destructive: oklch(0.55 0.2 25);
-  --border: #d5ddd4;
-  --input: #d5ddd4;
-  --ring: #3f7a52;
-  --chart-1: #3f7a52;
-  --chart-2: #6b8f71;
-  --chart-3: #2b5a3a;
-  --chart-4: #a3b8a7;
-  --chart-5: #152018;
-  --radius: 0.75rem;
-  --sidebar: #f3f6f1;
-  --sidebar-foreground: #152018;
-  --sidebar-primary: #2b5a3a;
-  --sidebar-primary-foreground: #f7faf6;
-  --sidebar-accent: #dce9df;
-  --sidebar-accent-foreground: #152018;
-  --sidebar-border: #d5ddd4;
-  --sidebar-ring: #3f7a52;
+  /* BoxMart semantic aliases used in page / calculator */
+  --ink: #333333;
+  --muted: #666666;
+  --panel: #ffffff;
+  --line: #ebebeb;
+  --line-strong: #d6d6d6;
+  --surface: #f9f9f9;
+  --surface-muted: #fcfcfc;
+  /* Accent (selection / links / focus) — was moss */
+  --moss: #415ac1;
+  --moss-deep: #3449a3;
+  --moss-soft: #eef2fd;
+  --cta: #333333;
+  --cta-hover: #1a1a1a;
+  --success: #047857;
+  --warning: #b45309;
+  --danger: #b91c1c;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 2px 8px rgb(0 0 0 / 0.06);
+  --shadow-lg: 0 8px 24px rgb(0 0 0 / 0.08);
+  --control-h: 40px;
+  --tap-min: 44px;
+
+  /* shadcn bridge */
+  --background: #f9f9f9;
+  --foreground: #333333;
+  --card: #ffffff;
+  --card-foreground: #333333;
+  --popover: #ffffff;
+  --popover-foreground: #333333;
+  --primary: #333333;
+  --primary-foreground: #f8fafc;
+  --secondary: #fcfcfc;
+  --secondary-foreground: #333333;
+  --muted-bg: #fcfcfc;
+  --muted-foreground: #666666;
+  --accent: #eef2fd;
+  --accent-foreground: #3449a3;
+  --destructive: #b91c1c;
+  --border: #ebebeb;
+  --input: #ebebeb;
+  --ring: #415ac1;
+  --chart-1: #415ac1;
+  --chart-2: #3449a3;
+  --chart-3: #047857;
+  --chart-4: #b45309;
+  --chart-5: #333333;
+  --radius: 10px;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #333333;
+  --sidebar-primary: #415ac1;
+  --sidebar-primary-foreground: #f8fafc;
+  --sidebar-accent: #eef2fd;
+  --sidebar-accent-foreground: #3449a3;
+  --sidebar-border: #ebebeb;
+  --sidebar-ring: #415ac1;
 }
 
 @layer base {
@@ -100,12 +122,17 @@
   }
   html {
     @apply font-sans;
+    scroll-behavior: smooth;
   }
 }
 
 @layer utilities {
   .font-display {
-    font-family: var(--font-display), var(--font-sans), system-ui, sans-serif;
+    font-family: var(--font-boxmart-sans), system-ui, sans-serif;
+    letter-spacing: -0.01em;
+  }
+  .font-mono {
+    font-family: var(--font-boxmart-mono), ui-monospace, monospace;
   }
 }
 
@@ -120,15 +147,6 @@
   }
 }
 
-@keyframes grain-shift {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 120px 80px;
-  }
-}
-
 @keyframes draw-box {
   from {
     stroke-dashoffset: 240;
@@ -139,41 +157,37 @@
 }
 
 .animate-rise {
-  animation: rise-in 0.7s ease-out both;
+  animation: rise-in 0.55s ease-out both;
 }
 
 .animate-rise-delay {
-  animation: rise-in 0.8s ease-out 0.12s both;
+  animation: rise-in 0.6s ease-out 0.08s both;
 }
 
 .animate-rise-delay-2 {
-  animation: rise-in 0.85s ease-out 0.22s both;
+  animation: rise-in 0.65s ease-out 0.14s both;
 }
 
 .page-atmosphere {
-  background:
-    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(63, 122, 82, 0.18), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 90% 0%, rgba(21, 32, 24, 0.08), transparent 50%),
-    linear-gradient(165deg, #edf3eb 0%, #e2ebe0 42%, #d7e2d6 100%);
-}
-
-.page-atmosphere::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.35;
-  background-image: repeating-linear-gradient(
-    -18deg,
-    transparent,
-    transparent 11px,
-    rgba(21, 32, 24, 0.03) 11px,
-    rgba(21, 32, 24, 0.03) 12px
-  );
-  animation: grain-shift 40s linear infinite;
+  background: var(--surface);
 }
 
 .hero-box-stroke {
   stroke-dasharray: 240;
-  animation: draw-box 1.4s ease-out forwards;
+  animation: draw-box 1.2s ease-out forwards;
+}
+
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(65 90 193 / 0.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

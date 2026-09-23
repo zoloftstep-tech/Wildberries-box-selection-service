@@ -1,15 +1,19 @@
 import type { Metadata } from "next";
-import { Manrope, Unbounded } from "next/font/google";
+import { Fira_Code, Fira_Sans } from "next/font/google";
 import "./globals.css";
 
-const manrope = Manrope({
-  variable: "--font-sans",
-  subsets: ["latin", "cyrillic"],
+const firaSans = Fira_Sans({
+  subsets: ["latin", "cyrillic", "cyrillic-ext"],
+  variable: "--font-boxmart-sans",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
 });
 
-const unbounded = Unbounded({
-  variable: "--font-display",
-  subsets: ["latin", "cyrillic"],
+const firaCode = Fira_Code({
+  subsets: ["latin"],
+  variable: "--font-boxmart-mono",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -22,7 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="ru"
-      className={`${manrope.variable} ${unbounded.variable} h-full antialiased`}
+      className={`${firaSans.variable} ${firaCode.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">{children}</body>
     </html>

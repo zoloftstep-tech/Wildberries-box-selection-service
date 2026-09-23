@@ -120,11 +120,11 @@ export function BoxCalculator() {
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-10">
       <section
-        className="relative overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)]/90 p-5 shadow-[0_20px_60px_-40px_rgba(20,30,20,0.55)] backdrop-blur-sm sm:p-7"
+        className="relative overflow-hidden rounded-[var(--radius-lg,14px)] border border-[var(--line)] bg-[var(--panel)] p-5 shadow-[var(--shadow-sm)] sm:p-7"
         aria-labelledby="calc-form-title"
       >
-        <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-[var(--moss)]/15 blur-2xl" />
-        <h2 id="calc-form-title" className="font-display text-2xl tracking-tight text-[var(--ink)]">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-[var(--moss)]/10 blur-2xl" />
+        <h2 id="calc-form-title" className="font-display text-2xl font-semibold tracking-tight text-[var(--ink)]">
           Параметры товара
         </h2>
         <p className="mt-1 max-w-md text-sm text-[var(--muted)]">
@@ -136,14 +136,14 @@ export function BoxCalculator() {
           <button
             type="button"
             onClick={() => applyPreset("sachets")}
-            className="rounded-lg border border-[var(--line)] bg-white/70 px-3 py-1.5 text-sm font-medium text-[var(--ink)] transition hover:border-[var(--moss)]"
+            className="cursor-pointer rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-1.5 text-sm font-medium text-[var(--ink)] transition hover:border-[var(--line-strong)] hover:bg-white"
           >
             Пример: 100 пакетиков
           </button>
           <button
             type="button"
             onClick={() => applyPreset("candle")}
-            className="rounded-lg border border-[var(--line)] bg-white/70 px-3 py-1.5 text-sm font-medium text-[var(--ink)] transition hover:border-[var(--moss)]"
+            className="cursor-pointer rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-1.5 text-sm font-medium text-[var(--ink)] transition hover:border-[var(--line-strong)] hover:bg-white"
           >
             Пример: круглая свеча
           </button>
@@ -171,10 +171,10 @@ export function BoxCalculator() {
                   }
                 }}
                 className={cn(
-                  "rounded-xl border px-3 py-3 text-left transition-all duration-300",
+                  "cursor-pointer rounded-[var(--radius-md,10px)] border px-3 py-3 text-left transition-all duration-150",
                   shape === opt.id
                     ? "border-[var(--moss)] bg-[var(--moss-soft)] shadow-[inset_0_0_0_1px_var(--moss)]"
-                    : "border-[var(--line)] bg-white/50 hover:border-[var(--moss)]/50",
+                    : "border-[var(--line)] bg-[var(--surface-muted)] hover:border-[var(--line-strong)]",
                 )}
               >
                 <div className="text-sm font-semibold text-[var(--ink)]">
@@ -255,10 +255,10 @@ export function BoxCalculator() {
                 type="button"
                 onClick={() => setPacking(opt.id)}
                 className={cn(
-                  "rounded-xl border px-3 py-2.5 text-left transition-all duration-300",
+                  "cursor-pointer rounded-[var(--radius-md,10px)] border px-3 py-2.5 text-left transition-all duration-150",
                   packing === opt.id
-                    ? "border-[var(--ink)] bg-[var(--ink)] text-white"
-                    : "border-[var(--line)] bg-white/50 text-[var(--ink)] hover:border-[var(--ink)]/40",
+                    ? "border-[var(--cta)] bg-[var(--cta)] text-white"
+                    : "border-[var(--line)] bg-[var(--surface-muted)] text-[var(--ink)] hover:border-[var(--line-strong)]",
                 )}
               >
                 <div className="text-sm font-semibold">{opt.title}</div>
@@ -279,7 +279,7 @@ export function BoxCalculator() {
           <button
             type="button"
             onClick={calculate}
-            className="inline-flex h-12 min-w-[200px] items-center justify-center rounded-xl bg-[var(--moss)] px-5 text-base font-semibold text-white transition hover:bg-[var(--moss-deep)]"
+            className="inline-flex h-11 min-w-[200px] cursor-pointer items-center justify-center rounded-[var(--radius-md,10px)] bg-[var(--cta)] px-5 text-base font-semibold text-white transition hover:bg-[var(--cta-hover)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgb(65_90_193_/_0.25)]"
           >
             {isPending ? "Считаем…" : "Подобрать коробку"}
           </button>
@@ -291,7 +291,7 @@ export function BoxCalculator() {
       </section>
 
       <section
-        className="min-h-[28rem] rounded-2xl border border-[var(--line)] bg-[var(--panel)]/70 p-5 sm:p-7"
+        className="min-h-[28rem] rounded-[var(--radius-lg,14px)] border border-[var(--line)] bg-[var(--panel)] p-5 shadow-[var(--shadow-sm)] sm:p-7"
         aria-live="polite"
       >
         {!result ? (
@@ -337,7 +337,7 @@ function Field({
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="h-11 border-[var(--line)] bg-white/80"
+        className="h-11 border-[var(--line)] bg-[var(--surface-muted)] text-base focus-visible:border-[var(--moss)] focus-visible:ring-[var(--moss)]/20"
       />
     </div>
   );
@@ -347,10 +347,10 @@ function EmptyState() {
   return (
     <div className="flex h-full min-h-[24rem] flex-col justify-between">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--moss)]">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--moss)]">
           Результат
         </p>
-        <h2 className="font-display mt-2 text-3xl tracking-tight text-[var(--ink)]">
+        <h2 className="font-display mt-2 text-3xl font-semibold tracking-tight text-[var(--ink)]">
           Размер появится здесь
         </h2>
         <p className="mt-3 max-w-sm text-sm leading-relaxed text-[var(--muted)]">
@@ -404,12 +404,12 @@ function Results({
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--moss)]">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--moss)]">
           Расчёт
         </p>
-        <h2 className="font-display mt-1 text-2xl tracking-tight text-[var(--ink)] sm:text-3xl">
+        <h2 className="font-display mt-1 text-2xl font-semibold tracking-tight text-[var(--ink)] sm:text-3xl">
           Нужен внутренний размер{" "}
-          <span className="whitespace-nowrap text-[var(--moss-deep)]">
+          <span className="font-mono whitespace-nowrap text-[var(--moss-deep)]">
             {need.lengthMm}×{need.widthMm}×{need.heightMm} мм
           </span>
         </h2>
@@ -434,12 +434,12 @@ function Results({
         </ul>
       )}
       {result.markingHint && (
-        <p className="rounded-xl border border-amber-700/20 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+        <p className="rounded-[var(--radius-md,10px)] border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--warning)_8%,white)] px-3 py-2 text-sm text-[#422006]">
           {result.markingHint}
         </p>
       )}
       {result.palletHint && (
-        <p className="rounded-xl border border-[var(--line)] bg-white/80 px-3 py-2 text-sm text-[var(--ink)]">
+        <p className="rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--ink)]">
           {result.palletHint}
         </p>
       )}
@@ -504,10 +504,10 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+        "cursor-pointer rounded-[var(--radius-md,10px)] border px-3 py-1.5 text-xs font-semibold transition-colors duration-150",
         active
           ? "border-[var(--moss)] bg-[var(--moss-soft)] text-[var(--moss-deep)]"
-          : "border-[var(--line)] bg-white/60 text-[var(--muted)] hover:text-[var(--ink)]",
+          : "border-[var(--line)] bg-[var(--surface-muted)] text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--ink)]",
       )}
     >
       {children}
@@ -517,13 +517,13 @@ function FilterChip({
 
 function CustomBoxCard({ rec }: { rec: BoxRecommendation }) {
   return (
-    <article className="overflow-hidden rounded-2xl border border-[var(--moss)]/40 bg-[var(--moss-soft)]/60 p-4">
+    <article className="overflow-hidden rounded-[var(--radius-lg,14px)] border border-[var(--moss)]/35 bg-[var(--moss-soft)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--moss-deep)]">
             Индивидуальный размер
           </p>
-          <p className="font-display mt-1 text-2xl text-[var(--ink)]">
+          <p className="font-display mt-1 font-mono text-2xl font-semibold text-[var(--ink)]">
             {rec.box.label} мм
           </p>
           <p className="mt-1 text-sm text-[var(--muted)]">
@@ -547,16 +547,16 @@ function CatalogCard({ rec }: { rec: BoxRecommendation }) {
   return (
     <article
       className={cn(
-        "rounded-2xl border bg-white/75 p-4 transition-shadow",
+        "rounded-[var(--radius-lg,14px)] border bg-[var(--panel)] p-4 transition-shadow duration-150",
         rec.isBest
-          ? "border-[var(--moss)] shadow-[0_12px_40px_-28px_rgba(40,80,50,0.8)]"
+          ? "border-[var(--moss)] shadow-[var(--shadow-md)]"
           : "border-[var(--line)]",
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
-            <p className="font-display text-xl text-[var(--ink)]">
+            <p className="font-display font-mono text-xl font-semibold text-[var(--ink)]">
               {rec.box.label} мм
             </p>
             {rec.isBest && (
@@ -568,7 +568,7 @@ function CatalogCard({ rec }: { rec: BoxRecommendation }) {
               <Badge variant="secondary">Ходовой</Badge>
             )}
             {rec.pallet.exact && (
-              <Badge className="bg-[var(--ink)] text-white hover:bg-[var(--ink)]">
+              <Badge className="bg-[var(--cta)] text-white hover:bg-[var(--cta-hover)]">
                 Паллет без зазоров
               </Badge>
             )}
@@ -610,18 +610,18 @@ function PalletLine({ pallet }: { pallet: BoxRecommendation["pallet"] }) {
   return (
     <div
       className={cn(
-        "mt-3 rounded-xl border px-3 py-2.5",
+        "mt-3 rounded-[var(--radius-md,10px)] border px-3 py-2.5",
         pallet.exact
           ? "border-[var(--moss)]/40 bg-[var(--moss-soft)]"
           : good
-            ? "border-[var(--line)] bg-white/90"
-            : "border-amber-700/25 bg-amber-50",
+            ? "border-[var(--line)] bg-[var(--surface-muted)]"
+            : "border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--warning)_8%,white)]",
       )}
     >
       <p
         className={cn(
           "text-[10px] font-semibold uppercase tracking-[0.14em]",
-          good ? "text-[var(--moss-deep)]" : "text-amber-900",
+          good ? "text-[var(--moss-deep)]" : "text-[#422006]",
         )}
       >
         Европаллет 1200×800
@@ -629,7 +629,7 @@ function PalletLine({ pallet }: { pallet: BoxRecommendation["pallet"] }) {
       <p
         className={cn(
           "mt-1 text-sm leading-snug",
-          good ? "text-[var(--ink)]" : "text-amber-950",
+          good ? "text-[var(--ink)]" : "text-[#422006]",
         )}
       >
         {pallet.exact
@@ -653,10 +653,10 @@ function ComplianceBadges({ rec }: { rec: BoxRecommendation }) {
           key={c.model.id}
           title={c.messages.join(" ")}
           className={cn(
-            "rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+            "rounded-[var(--radius-sm,8px)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
             c.ok
-              ? "bg-emerald-100 text-emerald-900"
-              : "bg-stone-200/80 text-stone-500 line-through decoration-stone-400",
+              ? "bg-[color-mix(in_srgb,var(--success)_12%,white)] text-[var(--success)]"
+              : "bg-[var(--surface-muted)] text-[var(--muted)] line-through decoration-[var(--line-strong)]",
           )}
         >
           {c.model.shortTitle}

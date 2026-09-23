@@ -11,7 +11,7 @@ export default function Home() {
             viewBox="0 0 36 36"
             fill="none"
             aria-hidden
-            className="text-[var(--moss-deep)]"
+            className="text-[var(--moss)]"
           >
             <rect
               x="4"
@@ -22,7 +22,7 @@ export default function Home() {
               className="hero-box-stroke"
               stroke="currentColor"
               strokeWidth="2"
-              fill="rgba(63,122,82,0.12)"
+              fill="rgba(65,90,193,0.12)"
             />
             <rect
               x="12"
@@ -32,21 +32,21 @@ export default function Home() {
               rx="2"
               stroke="currentColor"
               strokeWidth="2"
-              fill="rgba(243,246,241,0.7)"
+              fill="rgba(255,255,255,0.85)"
             />
           </svg>
           <div>
-            <p className="font-display text-lg leading-none tracking-tight text-[var(--ink)] sm:text-xl">
+            <p className="font-display text-lg font-semibold leading-none tracking-tight text-[var(--ink)] sm:text-xl">
               Коробомер
             </p>
-            <p className="mt-0.5 text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
-              под стандарты WB
+            <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+              BoxMart · под стандарты WB
             </p>
           </div>
         </div>
         <a
           href="#rules"
-          className="text-sm font-medium text-[var(--moss-deep)] underline-offset-4 hover:underline"
+          className="focus-ring text-sm font-semibold text-[var(--moss)] transition-colors hover:text-[var(--moss-deep)]"
         >
           Правила WB
         </a>
@@ -54,10 +54,10 @@ export default function Home() {
 
       <main className="relative z-10 mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6">
         <section className="animate-rise pb-8 pt-2 sm:pb-10 sm:pt-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--moss)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--moss)]">
             Картонные коробки · FBS / FBW
           </p>
-          <h1 className="font-display mt-3 max-w-3xl text-4xl leading-[1.05] tracking-tight text-[var(--ink)] sm:text-5xl md:text-6xl">
+          <h1 className="font-display mt-3 max-w-3xl text-4xl font-semibold leading-[1.05] tracking-tight text-[var(--ink)] sm:text-5xl md:text-6xl">
             Коробомер
           </h1>
           <p className="animate-rise-delay mt-4 max-w-xl text-base leading-relaxed text-[var(--muted)] sm:text-lg">
@@ -71,7 +71,7 @@ export default function Home() {
         </div>
 
         <section id="rules" className="mt-16 scroll-mt-8">
-          <h2 className="font-display text-2xl tracking-tight text-[var(--ink)] sm:text-3xl">
+          <h2 className="font-display text-2xl font-semibold tracking-tight text-[var(--ink)] sm:text-3xl">
             Лимиты, на которых строится расчёт
           </h2>
           <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
@@ -82,7 +82,7 @@ export default function Home() {
 
           <div className="mt-8 grid gap-6 md:grid-cols-2">
             <article className="border-t border-[var(--line)] pt-4">
-              <h3 className="font-display text-xl text-[var(--ink)]">
+              <h3 className="font-display text-xl font-semibold text-[var(--ink)]">
                 Склад WB (FBW)
               </h3>
               <ul className="mt-3 space-y-2 text-sm leading-relaxed text-[var(--muted)]">
@@ -103,7 +103,7 @@ export default function Home() {
             </article>
 
             <article className="border-t border-[var(--line)] pt-4">
-              <h3 className="font-display text-xl text-[var(--ink)]">
+              <h3 className="font-display text-xl font-semibold text-[var(--ink)]">
                 Маркетплейс (FBS)
               </h3>
               <ul className="mt-3 space-y-2 text-sm leading-relaxed text-[var(--muted)]">
@@ -123,7 +123,7 @@ export default function Home() {
               </ul>
             </article>
             <article className="border-t border-[var(--line)] pt-4 md:col-span-2">
-              <h3 className="font-display text-xl text-[var(--ink)]">
+              <h3 className="font-display text-xl font-semibold text-[var(--ink)]">
                 Европаллет 1200×800
               </h3>
               <ul className="mt-3 space-y-2 text-sm leading-relaxed text-[var(--muted)]">
