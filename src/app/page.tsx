@@ -122,6 +122,31 @@ export default function Home() {
                 </li>
               </ul>
             </article>
+            <article className="border-t border-[var(--line)] pt-4 md:col-span-2">
+              <h3 className="font-display text-xl text-[var(--ink)]">
+                Европаллет 1200×800
+              </h3>
+              <ul className="mt-3 space-y-2 text-sm leading-relaxed text-[var(--muted)]">
+                <li>
+                  Склады WB принимают поставки на деревянных паллетах
+                  евростандарта:{" "}
+                  <strong className="text-[var(--ink)]">120×80 см</strong>.
+                </li>
+                <li>
+                  Коробка может проходить лимиты стороны/суммы, но{" "}
+                  <strong className="text-[var(--ink)]">
+                    плохо ложиться на паллет
+                  </strong>{" "}
+                  — например 300×300 даёт 4×2 = 8 шт/слой и остаток 200 мм по
+                  стороне 800.
+                </li>
+                <li>
+                  Удобные основания делят 1200 и 800 без остатка: 100, 160×100,
+                  200, 400 и т.п. Для 160×120 — расклад 10×5 = 50 шт/слой без
+                  зазоров.
+                </li>
+              </ul>
+            </article>
           </div>
 
           <p className="mt-8 text-xs leading-relaxed text-[var(--muted)]">

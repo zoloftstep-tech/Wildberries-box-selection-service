@@ -358,10 +358,14 @@ function EmptyState() {
           и сверяет коробку с лимитами FBS и FBW: сторона, сумма сторон, вес.
         </p>
       </div>
-      <div className="mt-8 grid gap-3 text-sm text-[var(--muted)]">
+          <div className="mt-8 grid gap-3 text-sm text-[var(--muted)]">
         <RuleLine title="FBW · короб" text="сторона ≤ 80 см, сумма ≤ 160 см, вес < 25 кг" />
         <RuleLine title="FBS · СЦ" text="сторона ≤ 120 см, сумма ≤ 200 см, вес < 25 кг" />
         <RuleLine title="FBS · ПВЗ" text="товар: сумма ≤ 140 см; короб: сторона ≤ 80 см" />
+        <RuleLine
+          title="Европаллет"
+          text="основание коробок должно укладываться на 1200×800 без большого остатка"
+        />
       </div>
     </div>
   );
@@ -432,6 +436,11 @@ function Results({
       {result.markingHint && (
         <p className="rounded-xl border border-amber-700/20 bg-amber-50 px-3 py-2 text-sm text-amber-950">
           {result.markingHint}
+        </p>
+      )}
+      {result.palletHint && (
+        <p className="rounded-xl border border-[var(--line)] bg-white/80 px-3 py-2 text-sm text-[var(--ink)]">
+          {result.palletHint}
         </p>
       )}
 
@@ -524,6 +533,7 @@ function CustomBoxCard({ rec }: { rec: BoxRecommendation }) {
         <ComplianceBadges rec={rec} />
       </div>
       <GapLine fit={rec.fit} />
+      <PalletLine pallet={rec.pallet} />
       {rec.warnings.map((w) => (
         <p key={w} className="mt-2 text-xs text-amber-900">
           {w}
@@ -557,6 +567,11 @@ function CatalogCard({ rec }: { rec: BoxRecommendation }) {
             {rec.box.popular && !rec.isBest && (
               <Badge variant="secondary">Ходовой</Badge>
             )}
+            {rec.pallet.exact && (
+              <Badge className="bg-[var(--ink)] text-white hover:bg-[var(--ink)]">
+                Паллет без зазоров
+              </Badge>
+            )}
           </div>
           <p className="mt-1 text-sm text-[var(--muted)]">
             Ориентация {rec.fit.orientation.lengthMm}×
@@ -567,6 +582,7 @@ function CatalogCard({ rec }: { rec: BoxRecommendation }) {
         <ComplianceBadges rec={rec} />
       </div>
       <GapLine fit={rec.fit} />
+      <PalletLine pallet={rec.pallet} />
       {rec.warnings.map((w) => (
         <p key={w} className="mt-2 text-xs text-amber-900">
           {w}
@@ -585,6 +601,23 @@ function GapLine({
     <p className="mt-3 text-xs text-[var(--muted)]">
       Зазоры: {Math.round(fit.gaps.lengthMm)} / {Math.round(fit.gaps.widthMm)} /{" "}
       {Math.round(fit.gaps.heightMm)} мм по осям после ориентации
+    </p>
+  );
+}
+
+function PalletLine({ pallet }: { pallet: BoxRecommendation["pallet"] }) {
+  return (
+    <p
+      className={cn(
+        "mt-1 text-xs",
+        pallet.exact
+          ? "font-medium text-[var(--moss-deep)]"
+          : pallet.ok && pallet.coverage >= 0.95
+            ? "text-[var(--ink)]"
+            : "text-amber-900",
+      )}
+    >
+      {pallet.summary}
     </p>
   );
 }

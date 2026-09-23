@@ -1,9 +1,13 @@
 import {
   BOX_CATALOG,
-  boxVolume,
   sortedDims,
   type CatalogBox,
 } from "./box-catalog";
+import {
+  bestPalletFit,
+  palletIsPractical,
+  type PalletFit,
+} from "./euro-pallet";
 import {
   checkAllModels,
   type ComplianceResult,
@@ -51,6 +55,7 @@ export interface BoxRecommendation {
   box: CatalogBox;
   fit: FitScore;
   compliance: ComplianceResult[];
+  pallet: PalletFit;
   isBest: boolean;
   warnings: string[];
 }
@@ -63,6 +68,8 @@ export interface SizingResult {
   custom: BoxRecommendation;
   notes: string[];
   markingHint: string | null;
+  /** Пример: почему 300×300×80 отвергают при паллетировании */
+  palletHint: string | null;
 }
 
 /** Зазор на сторону (мм) по режиму упаковки. */
@@ -226,7 +233,7 @@ export function tryFit(box: Dims, required: Dims): FitScore | null {
 function buildWarnings(
   fit: FitScore,
   compliance: ComplianceResult[],
-  productBlock: Dims,
+  pallet: PalletFit,
 ): string[] {
   const warnings: string[] = [];
   if (fit.unusedVolumeRatio > 0.45 || fit.maxGapMm > 40) {
@@ -235,18 +242,67 @@ function buildWarnings(
     );
   }
   if (fit.maxGapMm <= 4 && fit.unusedVolumeRatio < 0.15) {
-    warnings.push("Плотная посадка: удобно для FBS/FBW, но проверьте, что товар легко достаётся.");
+    warnings.push(
+      "Плотная посадка: удобно для FBS/FBW, но проверьте, что товар легко достаётся.",
+    );
   }
   const failed = compliance.filter((c) => !c.ok);
   if (failed.length === compliance.length) {
-    warnings.push("Размер не проходит ни одну из стандартных моделей FBS/FBW без статуса КГТ+/СГТ.");
+    warnings.push(
+      "Размер не проходит ни одну из стандартных моделей FBS/FBW без статуса КГТ+/СГТ.",
+    );
   }
-  const minFace = Math.min(productBlock.lengthMm, productBlock.widthMm, productBlock.heightMm);
-  const maxFace = Math.max(productBlock.lengthMm, productBlock.widthMm);
-  if (maxFace < 80 && minFace < 80) {
-    // handled via markingHint
+  if (!pallet.ok) {
+    warnings.push(
+      "Не ложится на европаллет 1200×800 без свеса — для отгрузки на склад WB это критично.",
+    );
+  } else if (!palletIsPractical(pallet)) {
+    warnings.push(
+      `Слабая укладка на европаллет: ${pallet.summary} Типичная причина отказа размера вроде 300×300.`,
+    );
   }
   return warnings;
+}
+
+function makeRecommendation(
+  kind: "catalog" | "custom",
+  box: CatalogBox,
+  requiredInner: Dims,
+  weight: number | null,
+): BoxRecommendation | null {
+  const fit = tryFit(box, requiredInner);
+  if (!fit) return null;
+  const compliance = checkAllModels(
+    box.lengthMm,
+    box.widthMm,
+    box.heightMm,
+    weight,
+  );
+  const pallet = bestPalletFit(box);
+  return {
+    kind,
+    box,
+    fit,
+    compliance,
+    pallet,
+    isBest: false,
+    warnings: buildWarnings(fit, compliance, pallet),
+  };
+}
+
+function rankKey(r: BoxRecommendation): [number, number, number, number] {
+  const modelOk = r.compliance.filter((c) => c.ok).length;
+  const palletScore = r.pallet.exact ? 2 : palletIsPractical(r.pallet) ? 1 : 0;
+  return [modelOk, palletScore, r.pallet.coverage, -r.fit.score];
+}
+
+function compareRecs(a: BoxRecommendation, b: BoxRecommendation): number {
+  const ka = rankKey(a);
+  const kb = rankKey(b);
+  for (let i = 0; i < ka.length; i++) {
+    if (kb[i]! !== ka[i]!) return kb[i]! - ka[i]!;
+  }
+  return 0;
 }
 
 export function recommendBoxes(input: ProductInput): SizingResult {
@@ -263,7 +319,7 @@ export function recommendBoxes(input: ProductInput): SizingResult {
   }
   if (input.shape === "flat_stack") {
     notes.push(
-      `Стопка из ${Math.max(1, Math.floor(input.quantity))} плоских единиц: высота = толщина × количество.`,
+      `Укладка ${Math.max(1, Math.floor(input.quantity))} плоских единиц: считается блок ${productBlock.lengthMm}×${productBlock.widthMm}×${productBlock.heightMm} мм (можно переориентировать при сборке).`,
     );
   }
   if (input.packing === "fragile") {
@@ -273,6 +329,9 @@ export function recommendBoxes(input: ProductInput): SizingResult {
   } else if (input.packing === "bubble") {
     notes.push("Заложен запас под слой пузырчатой плёнки.");
   }
+  notes.push(
+    "Отдельно проверяется укладка на европаллет 1200×800 мм (принимают склады WB).",
+  );
 
   const customDims = roundUpCustom(requiredInner);
   const customBox: CatalogBox = {
@@ -282,54 +341,24 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     heightMm: customDims.heightMm,
     label: `${customDims.lengthMm}×${customDims.widthMm}×${customDims.heightMm}`,
   };
-  const customFit = tryFit(customBox, requiredInner)!;
-  const customCompliance = checkAllModels(
-    customBox.lengthMm,
-    customBox.widthMm,
-    customBox.heightMm,
-    weight,
-  );
-  const custom: BoxRecommendation = {
-    kind: "custom",
-    box: customBox,
-    fit: customFit,
-    compliance: customCompliance,
-    isBest: false,
-    warnings: buildWarnings(customFit, customCompliance, productBlock),
-  };
+  const custom = makeRecommendation("custom", customBox, requiredInner, weight)!;
 
   const catalogFits: BoxRecommendation[] = [];
   for (const box of BOX_CATALOG) {
-    const fit = tryFit(box, requiredInner);
-    if (!fit) continue;
-    const compliance = checkAllModels(
-      box.lengthMm,
-      box.widthMm,
-      box.heightMm,
-      weight,
-    );
-    catalogFits.push({
-      kind: "catalog",
-      box,
-      fit,
-      compliance,
-      isBest: false,
-      warnings: buildWarnings(fit, compliance, productBlock),
-    });
+    const rec = makeRecommendation("catalog", box, requiredInner, weight);
+    if (rec) catalogFits.push(rec);
   }
 
-  catalogFits.sort((a, b) => {
-    const aOk = a.compliance.filter((c) => c.ok).length;
-    const bOk = b.compliance.filter((c) => c.ok).length;
-    if (bOk !== aOk) return bOk - aOk;
-    return a.fit.score - b.fit.score;
-  });
+  catalogFits.sort(compareRecs);
 
   const top = catalogFits.slice(0, 6);
   if (top[0]) top[0].isBest = true;
 
-  // Prefer marking on box: goods < 80×80 mm need extra package for sticker
-  const faceA = Math.min(productBlock.lengthMm, productBlock.widthMm);
+  const faceA = Math.min(
+    productBlock.lengthMm,
+    productBlock.widthMm,
+    productBlock.heightMm,
+  );
   const faceB = Math.max(productBlock.lengthMm, productBlock.widthMm);
   let markingHint: string | null = null;
   if (faceA < 80 || faceB < 80) {
@@ -342,6 +371,15 @@ export function recommendBoxes(input: ProductInput): SizingResult {
       "Круглая поверхность: размещайте стикер на плоской стороне коробки, не на товаре.";
   }
 
+  const bad300 = bestPalletFit({
+    lengthMm: 300,
+    widthMm: 300,
+    heightMm: 80,
+  });
+  const palletHint = !bad300.exact
+    ? `Размер 300×300×80 проходит лимиты стороны/суммы WB, но на европаллете 1200×800 даёт расклад ${bad300.alongLength}×${bad300.alongWidth} с остатком ${bad300.leftoverLengthMm || bad300.leftoverWidthMm} мм (покрытие ${Math.round(bad300.coverage * 100)}%) — поэтому его часто отклоняют при паллетировании.`
+    : null;
+
   return {
     productBlock,
     requiredInner,
@@ -350,6 +388,7 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     custom,
     notes,
     markingHint,
+    palletHint,
   };
 }
 
