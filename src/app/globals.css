@@ -1,0 +1,179 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --font-heading: var(--font-display);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --ink: #152018;
+  --muted: #5d6a60;
+  --panel: #f3f6f1;
+  --line: #d5ddd4;
+  --moss: #3f7a52;
+  --moss-deep: #2b5a3a;
+  --moss-soft: #dce9df;
+  --paper: #e8efe6;
+  --background: #e8efe6;
+  --foreground: #152018;
+  --card: #f3f6f1;
+  --card-foreground: #152018;
+  --popover: #f7faf6;
+  --popover-foreground: #152018;
+  --primary: #2b5a3a;
+  --primary-foreground: #f7faf6;
+  --secondary: #dce9df;
+  --secondary-foreground: #152018;
+  --muted: #5d6a60;
+  --muted-foreground: #5d6a60;
+  --accent: #dce9df;
+  --accent-foreground: #152018;
+  --destructive: oklch(0.55 0.2 25);
+  --border: #d5ddd4;
+  --input: #d5ddd4;
+  --ring: #3f7a52;
+  --chart-1: #3f7a52;
+  --chart-2: #6b8f71;
+  --chart-3: #2b5a3a;
+  --chart-4: #a3b8a7;
+  --chart-5: #152018;
+  --radius: 0.75rem;
+  --sidebar: #f3f6f1;
+  --sidebar-foreground: #152018;
+  --sidebar-primary: #2b5a3a;
+  --sidebar-primary-foreground: #f7faf6;
+  --sidebar-accent: #dce9df;
+  --sidebar-accent-foreground: #152018;
+  --sidebar-border: #d5ddd4;
+  --sidebar-ring: #3f7a52;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display), var(--font-sans), system-ui, sans-serif;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes grain-shift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 120px 80px;
+  }
+}
+
+@keyframes draw-box {
+  from {
+    stroke-dashoffset: 240;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animate-rise {
+  animation: rise-in 0.7s ease-out both;
+}
+
+.animate-rise-delay {
+  animation: rise-in 0.8s ease-out 0.12s both;
+}
+
+.animate-rise-delay-2 {
+  animation: rise-in 0.85s ease-out 0.22s both;
+}
+
+.page-atmosphere {
+  background:
+    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(63, 122, 82, 0.18), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 90% 0%, rgba(21, 32, 24, 0.08), transparent 50%),
+    linear-gradient(165deg, #edf3eb 0%, #e2ebe0 42%, #d7e2d6 100%);
+}
+
+.page-atmosphere::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background-image: repeating-linear-gradient(
+    -18deg,
+    transparent,
+    transparent 11px,
+    rgba(21, 32, 24, 0.03) 11px,
+    rgba(21, 32, 24, 0.03) 12px
+  );
+  animation: grain-shift 40s linear infinite;
+}
+
+.hero-box-stroke {
+  stroke-dasharray: 240;
+  animation: draw-box 1.4s ease-out forwards;
+}
