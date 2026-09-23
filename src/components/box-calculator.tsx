@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,7 +52,9 @@ export function BoxCalculator() {
   const [preferModel, setPreferModel] = useState<SalesModel | "any">("any");
   const [onlyCompliant, setOnlyCompliant] = useState(true);
   const [isPending, startTransition] = useTransition();
-  const [result, setResult] = useState<SizingResult | null>(null);
+  const [result, setResult] = useState<SizingResult | null>(() =>
+    recommendBoxes(presetSachets()),
+  );
 
   const input: ProductInput = useMemo(
     () => ({
@@ -77,6 +78,13 @@ export function BoxCalculator() {
       packing,
     ],
   );
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      startTransition(() => setResult(recommendBoxes(input)));
+    }, 180);
+    return () => window.clearTimeout(t);
+  }, [input]);
 
   function applyPreset(kind: "sachets" | "candle") {
     const p = kind === "sachets" ? presetSachets() : presetCandle();
@@ -125,24 +133,20 @@ export function BoxCalculator() {
         </p>
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button
+          <button
             type="button"
-            variant="outline"
-            size="sm"
             onClick={() => applyPreset("sachets")}
-            className="border-[var(--line)] bg-white/70"
+            className="rounded-lg border border-[var(--line)] bg-white/70 px-3 py-1.5 text-sm font-medium text-[var(--ink)] transition hover:border-[var(--moss)]"
           >
             Пример: 100 пакетиков
-          </Button>
-          <Button
+          </button>
+          <button
             type="button"
-            variant="outline"
-            size="sm"
             onClick={() => applyPreset("candle")}
-            className="border-[var(--line)] bg-white/70"
+            className="rounded-lg border border-[var(--line)] bg-white/70 px-3 py-1.5 text-sm font-medium text-[var(--ink)] transition hover:border-[var(--moss)]"
           >
             Пример: круглая свеча
-          </Button>
+          </button>
         </div>
 
         <fieldset className="mt-6">
@@ -272,16 +276,16 @@ export function BoxCalculator() {
         </fieldset>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Button
+          <button
             type="button"
-            size="lg"
             onClick={calculate}
-            className="h-12 min-w-[200px] bg-[var(--moss)] text-base font-semibold text-white hover:bg-[var(--moss-deep)]"
+            className="inline-flex h-12 min-w-[200px] items-center justify-center rounded-xl bg-[var(--moss)] px-5 text-base font-semibold text-white transition hover:bg-[var(--moss-deep)]"
           >
             {isPending ? "Считаем…" : "Подобрать коробку"}
-          </Button>
+          </button>
           <p className="text-xs text-[var(--muted)]">
             Коробка только квадратная или прямоугольная — круглые исключены.
+            Расчёт обновляется при изменении параметров.
           </p>
         </div>
       </section>
