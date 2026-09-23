@@ -14,6 +14,10 @@ export interface LayoutPreviewProps {
   quantity: number;
   overlapMm?: number;
   gapMm?: number;
+  /** Номинальная толщина/высота единицы из ввода, мм */
+  nominalHeightMm?: number;
+  /** Заявленный объём россыпи, л — если задан, tEff может быть выше номинала */
+  occupiedVolumeLiters?: number | null;
   className?: string;
 }
 
@@ -424,6 +428,8 @@ export function LayoutPreview({
   quantity,
   overlapMm = 0,
   gapMm = 0,
+  nominalHeightMm,
+  occupiedVolumeLiters,
   className,
 }: LayoutPreviewProps) {
   const box = layout.innerBox;
@@ -434,6 +440,17 @@ export function LayoutPreview({
     () => buildUnitInstances(layout, qty, overlapMm, gapMm).length,
     [layout, qty, overlapMm, gapMm],
   );
+
+  const nomH = nominalHeightMm ?? layout.unitOrient.heightMm;
+  const tEff = layout.tEff;
+  const inflated =
+    occupiedVolumeLiters != null &&
+    occupiedVolumeLiters > 0 &&
+    tEff > nomH + 0.05;
+
+  const unitSizeLabel = inflated
+    ? `${Math.round(layout.unitOrient.lengthMm)}×${Math.round(layout.unitOrient.widthMm)}×${fmtThin(nomH)} мм (эфф. ${fmtThin(tEff)} мм по ${fmtVol(occupiedVolumeLiters)} л)`
+    : `${Math.round(layout.unitOrient.lengthMm)}×${Math.round(layout.unitOrient.widthMm)}×${fmtThin(tEff)} мм`;
 
   return (
     <div
@@ -472,14 +489,21 @@ export function LayoutPreview({
         </Canvas>
       </div>
       <p className="border-t border-[var(--line)] px-3 py-1.5 text-[11px] text-[var(--muted)]">
-        {unitCount} ед. · габарит единицы{" "}
-        {Math.round(layout.unitOrient.lengthMm)}×
-        {Math.round(layout.unitOrient.widthMm)}×
-        {Math.round(layout.tEff * 10) / 10} мм
+        {unitCount} ед. · габарит единицы {unitSizeLabel}
         {overlapMm > 0 ? ` · наложение ${overlapMm} мм` : ""}
         {" · "}
         коробка {box.lengthMm}×{box.widthMm}×{box.heightMm} мм
       </p>
     </div>
   );
+}
+
+function fmtThin(n: number): string {
+  const r = Math.round(n * 10) / 10;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+
+function fmtVol(n: number): string {
+  const r = Math.round(n * 10) / 10;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1).replace(".", ",");
 }

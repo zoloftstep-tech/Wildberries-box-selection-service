@@ -22,7 +22,7 @@ import {
   type SizingResult,
 } from "@/lib/sizing";
 import { productionLabel } from "@/lib/tech-access";
-import { fmtMm, type SalesModel, WB_MODELS } from "@/lib/wb-limits";
+import { fmtMm, checkAllModels, type SalesModel, WB_MODELS, type ComplianceResult } from "@/lib/wb-limits";
 import { cn } from "@/lib/utils";
 
 const LayoutPreview = dynamic(
@@ -581,6 +581,12 @@ export function BoxCalculator() {
             result={result}
             shape={shape}
             quantity={Math.max(1, Math.floor(num(quantity, 1)))}
+            nominalHeightMm={num(heightMm)}
+            occupiedVolumeLiters={
+              shape === "flat_stack" && flatLayout === "loose_bulk"
+                ? num(volumeLiters, 0) || null
+                : null
+            }
             overlapMm={
               shape === "flat_stack" &&
               flatLayout === "loose_bulk" &&
@@ -589,6 +595,7 @@ export function BoxCalculator() {
                 : 0
             }
             gapMm={0}
+            weightKg={weightKg.trim() === "" ? null : num(weightKg)}
             visible={visible}
             preferModel={preferModel}
             setPreferModel={setPreferModel}
@@ -693,8 +700,11 @@ function Results({
   result,
   shape,
   quantity,
+  nominalHeightMm,
+  occupiedVolumeLiters,
   overlapMm,
   gapMm,
+  weightKg,
   visible,
   preferModel,
   setPreferModel,
@@ -705,8 +715,11 @@ function Results({
   result: SizingResult;
   shape: ProductShape;
   quantity: number;
+  nominalHeightMm: number;
+  occupiedVolumeLiters: number | null;
   overlapMm: number;
   gapMm: number;
+  weightKg: number | null;
   visible: BoxRecommendation[];
   preferModel: SalesModel | "any";
   setPreferModel: (v: SalesModel | "any") => void;
@@ -749,6 +762,8 @@ function Results({
         quantity={quantity}
         overlapMm={overlapMm}
         gapMm={gapMm}
+        nominalHeightMm={nominalHeightMm}
+        occupiedVolumeLiters={occupiedVolumeLiters}
       />
 
       <div className="space-y-3">
@@ -760,6 +775,7 @@ function Results({
           selected={selectedId === result.etalon.id}
           onSelect={() => onSelectLayout(result.etalon.id)}
           badge="Эталон"
+          weightKg={weightKg}
         />
       </div>
 
@@ -778,6 +794,7 @@ function Results({
               selected={selectedId === layout.id}
               onSelect={() => onSelectLayout(layout.id)}
               badge="Оптимальная"
+              weightKg={weightKg}
             />
           ))}
         </div>
@@ -874,15 +891,23 @@ function LayoutCard({
   selected,
   onSelect,
   badge,
+  weightKg,
 }: {
   layout: LayoutCandidate;
   selected: boolean;
   onSelect: () => void;
   badge: string;
+  weightKg: number | null;
 }) {
   const palletGood =
     layout.pallet.exact ||
     (layout.pallet.ok && layout.pallet.coverage >= 0.9);
+  const compliance = checkAllModels(
+    layout.innerBox.lengthMm,
+    layout.innerBox.widthMm,
+    layout.innerBox.heightMm,
+    weightKg,
+  );
   return (
     <button
       type="button"
@@ -895,7 +920,7 @@ function LayoutCard({
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Badge
               className={
@@ -934,6 +959,7 @@ function LayoutCard({
           </p>
         </div>
       </div>
+      <ModelFitBadges compliance={compliance} />
       <div
         className={cn(
           "mt-3 rounded-[var(--radius-md,10px)] border px-3 py-2 text-sm",
@@ -949,6 +975,28 @@ function LayoutCard({
             : "Паллет: не укладывается"}
       </div>
     </button>
+  );
+}
+
+/** Зелёный = проходит модель, красный = нет. */
+function ModelFitBadges({ compliance }: { compliance: ComplianceResult[] }) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {compliance.map((c) => (
+        <span
+          key={c.model.id}
+          title={c.messages.join(" ") || c.model.title}
+          className={cn(
+            "rounded-[var(--radius-sm,8px)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+            c.ok
+              ? "bg-[color-mix(in_srgb,var(--success)_14%,white)] text-[var(--success)] ring-1 ring-[color-mix(in_srgb,var(--success)_35%,transparent)]"
+              : "bg-[color-mix(in_srgb,#dc2626_10%,white)] text-[#b91c1c] ring-1 ring-[color-mix(in_srgb,#dc2626_30%,transparent)]",
+          )}
+        >
+          {c.model.shortTitle}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -1324,8 +1372,8 @@ function ComplianceBadges({ rec }: { rec: BoxRecommendation }) {
           className={cn(
             "rounded-[var(--radius-sm,8px)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
             c.ok
-              ? "bg-[color-mix(in_srgb,var(--success)_12%,white)] text-[var(--success)]"
-              : "bg-[var(--surface-muted)] text-[var(--muted)] line-through decoration-[var(--line-strong)]",
+              ? "bg-[color-mix(in_srgb,var(--success)_14%,white)] text-[var(--success)] ring-1 ring-[color-mix(in_srgb,var(--success)_35%,transparent)]"
+              : "bg-[color-mix(in_srgb,#dc2626_10%,white)] text-[#b91c1c] ring-1 ring-[color-mix(in_srgb,#dc2626_30%,transparent)]",
           )}
         >
           {c.model.shortTitle}
