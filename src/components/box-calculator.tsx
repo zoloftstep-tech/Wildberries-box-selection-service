@@ -112,6 +112,12 @@ export function BoxCalculator() {
   const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [rowMatchTolMm, setRowMatchTolMm] = useState("8");
+  const [allowVoidFill, setAllowVoidFill] = useState(true);
+  const [dividerMm, setDividerMm] = useState("0");
+  const [maxDividerMm, setMaxDividerMm] = useState("30");
+  const [maxSideInsertMm, setMaxSideInsertMm] = useState("50");
+  const [maxHeightInsertMm, setMaxHeightInsertMm] = useState("80");
+  const [inflateFromVolume, setInflateFromVolume] = useState(false);
   const [maxStackHeightMm, setMaxStackHeightMm] = useState("");
   const [roundStepMm, setRoundStepMm] = useState("5");
   const [preferModel, setPreferModel] = useState<SalesModel | "any">("any");
@@ -148,6 +154,12 @@ export function BoxCalculator() {
       selectedLayoutId,
       rowMatchTolMm: num(rowMatchTolMm, 8),
       roundStepMm: num(roundStepMm, 5),
+      allowVoidFill,
+      dividerMm: num(dividerMm, 0),
+      maxDividerMm: num(maxDividerMm, 30),
+      maxSideInsertMm: num(maxSideInsertMm, 50),
+      maxHeightInsertMm: num(maxHeightInsertMm, 80),
+      inflateStackFromVolume: inflateFromVolume,
       maxStackHeightMm:
         maxStackHeightMm.trim() === "" ? null : num(maxStackHeightMm),
       preferredGroupCounts: [2, 4],
@@ -169,6 +181,12 @@ export function BoxCalculator() {
       selectedLayoutId,
       rowMatchTolMm,
       roundStepMm,
+      allowVoidFill,
+      dividerMm,
+      maxDividerMm,
+      maxSideInsertMm,
+      maxHeightInsertMm,
+      inflateFromVolume,
       maxStackHeightMm,
     ],
   );
@@ -206,6 +224,12 @@ export function BoxCalculator() {
     setWeightKg("");
     setPacking(p.packing);
     setRotateMode(p.rotateMode ?? "none");
+    setAllowVoidFill(Boolean(p.allowVoidFill));
+    setDividerMm(String(p.dividerMm ?? 0));
+    setMaxDividerMm(String(p.maxDividerMm ?? 30));
+    setMaxSideInsertMm(String(p.maxSideInsertMm ?? 50));
+    setMaxHeightInsertMm(String(p.maxHeightInsertMm ?? 80));
+    setInflateFromVolume(Boolean(p.inflateStackFromVolume));
     setSelectedLayoutId(null);
     startTransition(() => setResult(recommendBoxes({ ...p, selectedLayoutId: null })));
   }
@@ -519,6 +543,24 @@ export function BoxCalculator() {
           </div>
         </fieldset>
 
+        <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-sm text-[var(--ink)]">
+          <Checkbox
+            checked={allowVoidFill}
+            onCheckedChange={(v) => setAllowVoidFill(Boolean(v))}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-semibold">
+              Разрешить заполнить пустоту (вкладыш)
+            </span>
+            <span className="mt-0.5 block text-xs text-[var(--muted)]">
+              Модель сама подбирает разделитель между стопками и прокладки по
+              бокам / сверху-снизу в разумных пределах — чтобы выйти на
+              exact-паллет и техлимиты.
+            </span>
+          </span>
+        </label>
+
         <div className="mt-4">
           <button
             type="button"
@@ -529,6 +571,51 @@ export function BoxCalculator() {
           </button>
           {showAdvanced && (
             <div className="mt-3 grid gap-3 rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] p-3 sm:grid-cols-2">
+              {allowVoidFill ? (
+                <>
+                  <Field
+                    label="Макс. разделитель, мм"
+                    value={maxDividerMm}
+                    onChange={setMaxDividerMm}
+                    min={0}
+                    step="1"
+                    placeholder="30"
+                  />
+                  <Field
+                    label="Макс. вкладыш по бокам, мм"
+                    value={maxSideInsertMm}
+                    onChange={setMaxSideInsertMm}
+                    min={0}
+                    step="1"
+                    placeholder="50"
+                  />
+                  <Field
+                    label="Макс. вкладыш по высоте, мм"
+                    value={maxHeightInsertMm}
+                    onChange={setMaxHeightInsertMm}
+                    min={0}
+                    step="1"
+                    placeholder="80"
+                  />
+                  <Field
+                    label="Подсказка разделителя, мм (опц.)"
+                    value={dividerMm}
+                    onChange={setDividerMm}
+                    min={0}
+                    step="1"
+                    placeholder="0"
+                  />
+                </>
+              ) : (
+                <Field
+                  label="Разделитель между стопками, мм"
+                  value={dividerMm}
+                  onChange={setDividerMm}
+                  min={0}
+                  step="1"
+                  placeholder="10"
+                />
+              )}
               <Field
                 label="Допуск brick-рядов, мм"
                 value={rowMatchTolMm}
@@ -551,6 +638,21 @@ export function BoxCalculator() {
                 step="1"
                 placeholder="без ограничения"
               />
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--ink)] sm:col-span-2">
+                <Checkbox
+                  checked={inflateFromVolume}
+                  onCheckedChange={(v) => setInflateFromVolume(Boolean(v))}
+                />
+                <span>
+                  <span className="font-semibold">
+                    Раздувать высоту стопки из объёма
+                  </span>
+                  <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                    Выкл.: толщина номинальная (как 1,5 мм), объём только для
+                    пустот. Вкл.: tEff из литров.
+                  </span>
+                </span>
+              </label>
             </div>
           )}
         </div>
@@ -594,7 +696,10 @@ export function BoxCalculator() {
                 ? num(overlapMm, 0)
                 : 0
             }
-            gapMm={0}
+            gapMm={
+              result.selectedLayout?.voidFill?.dividerMm ??
+              num(dividerMm, 0)
+            }
             weightKg={weightKg.trim() === "" ? null : num(weightKg)}
             visible={visible}
             preferModel={preferModel}
@@ -768,13 +873,13 @@ function Results({
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-[var(--ink)]">
-          Эталон (1 стопка / 1 группа)
+          Эталон (1 стопка · лёжа на паллете)
         </h3>
         <LayoutCard
           layout={result.etalon}
           selected={selectedId === result.etalon.id}
           onSelect={() => onSelectLayout(result.etalon.id)}
-          badge="Эталон"
+          badge="Эталон · лёжа"
           weightKg={weightKg}
         />
       </div>
@@ -957,6 +1062,11 @@ function LayoutCard({
             {layout.summary} · пустоты {Math.round(layout.voidRatio * 100)}%
             {layout.rotatedFromCanon ? " · повёрнут от канона" : ""}
           </p>
+          {layout.voidFill && (
+            <p className="mt-1 text-xs text-[var(--moss-deep)]">
+              Вкладыш: {layout.voidFill.summary}
+            </p>
+          )}
         </div>
       </div>
       <ModelFitBadges compliance={compliance} />

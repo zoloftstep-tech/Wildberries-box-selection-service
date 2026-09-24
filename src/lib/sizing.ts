@@ -71,12 +71,26 @@ export interface ProductInput {
   maxGroups?: number;
   /** Soft boost в score для этих groupCount (обычно 2…6) */
   preferredGroupCounts?: number[];
-  /** Зазор между стопками в плоскости, мм */
+  /** Картонный разделитель: фикс при void-fill выкл; иначе модель подбирает */
+  dividerMm?: number;
+  /** @deprecated → dividerMm */
   interStackGapMm?: number;
   /** Отсев слишком высоких столбиков, мм */
   maxStackHeightMm?: number | null;
   /** Толщина стенки (паллет по outer = inner + 2×wall); v1 обычно 0 */
   wallThicknessMm?: number;
+  /** Раздувать высоту стопки из occupiedVolumeLiters (по умолчанию нет) */
+  inflateStackFromVolume?: boolean;
+  /** При snap к exact-паллету поднять H под объём россыпи */
+  fillHeightFromVolume?: boolean;
+  /**
+   * Разрешить вкладыши: разделитель, бока, верх/низ — в разумных пределах.
+   * Модель сама подбирает толщины под exact-паллет и техлимиты.
+   */
+  allowVoidFill?: boolean;
+  maxSideInsertMm?: number;
+  maxDividerMm?: number;
+  maxHeightInsertMm?: number;
   /**
    * Каталог/custom считать от этой укладки (id из layouts).
    * По умолчанию — эталон.
@@ -674,9 +688,16 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     roundStepMm: input.roundStepMm,
     maxGroups: input.maxGroups,
     preferredGroupCounts: input.preferredGroupCounts,
+    dividerMm: input.dividerMm,
     interStackGapMm: input.interStackGapMm,
     maxStackHeightMm: input.maxStackHeightMm,
     wallThicknessMm: input.wallThicknessMm,
+    inflateStackFromVolume: input.inflateStackFromVolume,
+    fillHeightFromVolume: input.fillHeightFromVolume,
+    allowVoidFill: input.allowVoidFill,
+    maxSideInsertMm: input.maxSideInsertMm,
+    maxDividerMm: input.maxDividerMm,
+    maxHeightInsertMm: input.maxHeightInsertMm,
   });
 
   const selectedLayout =
@@ -903,6 +924,13 @@ export function presetSachets(): ProductInput {
     allowOverlap: true,
     overlapMm: 15,
     rotateMode: "none",
+    dividerMm: 0,
+    allowVoidFill: true,
+    maxDividerMm: 30,
+    maxSideInsertMm: 50,
+    maxHeightInsertMm: 80,
+    inflateStackFromVolume: false,
+    fillHeightFromVolume: false,
     weightKg: null,
     packing: "standard",
     preferredGroupCounts: [2, 4],

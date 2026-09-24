@@ -63,7 +63,7 @@ function visualInset(sizeMm: number): number {
 /**
  * Ровно `quantity` единиц.
  * Позиции и шаг = как в enumerate (overlap/gap на обеих осях плоскости).
- * Размер меша чуть меньше — видны швы; AABB реальных габаритов ≤ productBlock ≤ innerBox.
+ * stackAxis x/y — стопка лёжа (эталон на паллете).
  */
 export function buildUnitInstances(
   layout: LayoutCandidate,
@@ -72,8 +72,16 @@ export function buildUnitInstances(
   gapMm = 0,
 ): UnitInstance[] {
   const qty = Math.max(1, Math.floor(quantity) || 1);
-  const { nx, ny, pattern, unitOrient, tEff, groupCount, productBlock } =
-    layout;
+  const {
+    nx,
+    ny,
+    pattern,
+    unitOrient,
+    tEff,
+    groupCount,
+    productBlock,
+    stackAxis = "z",
+  } = layout;
   const S = Math.max(1, Math.min(groupCount, nx * ny));
   const uL = Math.max(0.5, unitOrient.lengthMm);
   const uW = Math.max(0.5, unitOrient.widthMm);
@@ -109,26 +117,22 @@ export function buildUnitInstances(
     }
   }
 
-  // Uniform: шаг по X и по Y одинаков для всех рядов (как planeFootprint).
-  // Brick: по X у чётных/нечётных разные fl; по Y — глубина ряда с gap (без overlap в enum).
   const isBrick = pattern === "brick";
 
   let spanX: number;
   let spanY: number;
   let pitchX: number;
-  let pitchY: number;
   const rowCenterY: number[] = [];
 
   if (!isBrick) {
     spanX = spanAxis(uL, nx, ov, gap);
     spanY = spanAxis(uW, ny, ov, gap);
     pitchX = pitch(uL, ov, gap);
-    pitchY = pitch(uW, ov, gap);
+    const pitchY = pitch(uW, ov, gap);
     for (let iy = 0; iy < ny; iy++) {
       rowCenterY.push(-spanY / 2 + uW / 2 + iy * pitchY);
     }
   } else {
-    // Как planeFootprint brick
     const row1Len = spanAxis(uL, nx, ov, gap);
     const row2Len = spanAxis(uW, nx, ov, gap);
     spanX = Math.max(row1Len, row2Len);
@@ -146,8 +150,7 @@ export function buildUnitInstances(
       rowCenterY.push(yCursor + d / 2);
       yCursor += d + gap;
     }
-    pitchX = 0; // per-row below
-    pitchY = 0;
+    pitchX = 0;
   }
 
   const maxStackH = Math.max(...slots.map((s) => s.count * uH), uH);
@@ -155,7 +158,7 @@ export function buildUnitInstances(
   const insetW = visualInset(uW);
   const insetH = visualInset(uH);
 
-  const instances: UnitInstance[] = [];
+  let instances: UnitInstance[] = [];
   for (const slot of slots) {
     if (slot.count <= 0) continue;
 
@@ -187,23 +190,40 @@ export function buildUnitInstances(
     }
   }
 
-  // Подгонка в productBlock, если из‑за округлений чуть вылезли (не должно при
-  // совпадении overlap, но страхуем оси).
-  const fitted = fitIntoBlock(instances, productBlock, uL, uW, uH);
+  // Стоя → лёжа: ось стопки из Z в плоскость паллета
+  if (stackAxis === "y") {
+    instances = instances.map((i) => ({
+      ...i,
+      x: i.x,
+      y: i.z,
+      z: i.y,
+      l: i.l,
+      w: i.h,
+      h: i.w,
+    }));
+  } else if (stackAxis === "x") {
+    instances = instances.map((i) => ({
+      ...i,
+      x: i.z,
+      y: i.y,
+      z: i.x,
+      l: i.h,
+      w: i.w,
+      h: i.l,
+    }));
+  }
+
+  const fitted = fitIntoBlock(instances, productBlock);
   return fitted.slice(0, qty);
 }
 
-/** Масштаб только если AABB реальных (не визуальных) габаритов > block. */
+/** Масштаб только если AABB > productBlock. */
 function fitIntoBlock(
   instances: UnitInstance[],
   block: { lengthMm: number; widthMm: number; heightMm: number },
-  uL: number,
-  uW: number,
-  uH: number,
 ): UnitInstance[] {
   if (instances.length === 0) return instances;
 
-  // Восстанавливаем «полные» AABB по центрам + номинальный размер
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
@@ -211,16 +231,12 @@ function fitIntoBlock(
   let minZ = Infinity;
   let maxZ = -Infinity;
   for (const i of instances) {
-    // half of full unit (approx from visual + typical inset)
-    const hl = uL / 2;
-    const hw = uW / 2;
-    const hh = uH / 2;
-    minX = Math.min(minX, i.x - hl);
-    maxX = Math.max(maxX, i.x + hl);
-    minY = Math.min(minY, i.y - hw);
-    maxY = Math.max(maxY, i.y + hw);
-    minZ = Math.min(minZ, i.z - hh);
-    maxZ = Math.max(maxZ, i.z + hh);
+    minX = Math.min(minX, i.x - i.l / 2);
+    maxX = Math.max(maxX, i.x + i.l / 2);
+    minY = Math.min(minY, i.y - i.w / 2);
+    maxY = Math.max(maxY, i.y + i.w / 2);
+    minZ = Math.min(minZ, i.z - i.h / 2);
+    maxZ = Math.max(maxZ, i.z + i.h / 2);
   }
 
   const contentL = maxX - minX;

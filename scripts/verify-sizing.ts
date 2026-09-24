@@ -49,6 +49,48 @@ console.log(
 console.log("Sachets custom:", sachets.custom.box.label, sachets.custom.productionRoute);
 
 assert(sachets.etalon.groupCount === 1, "etalon is S=1");
+const voidFillSnap = sachets.optimal.find(
+  (o) =>
+    o.groupCount === 2 &&
+    o.pallet.exact &&
+    o.innerBox.lengthMm === 240 &&
+    o.innerBox.widthMm === 160 &&
+    o.innerBox.heightMm === 160 &&
+    o.tech.ok,
+);
+assert(voidFillSnap, "optimal includes 240×160×160 (pallet 5×5) with tech + void-fill");
+assert(
+  voidFillSnap!.voidFill &&
+    (voidFillSnap!.voidFill.dividerMm > 0 ||
+      voidFillSnap!.voidFill.sideInsertLMm > 0 ||
+      voidFillSnap!.voidFill.sideInsertWMm > 0 ||
+      voidFillSnap!.voidFill.heightInsertMm > 0),
+  "model self-picks void-fill for 240×160×160",
+);
+assert(
+  sachets.optimal[0]!.innerBox.lengthMm === 240 &&
+    sachets.optimal[0]!.innerBox.widthMm === 160 &&
+    sachets.optimal[0]!.innerBox.heightMm === 160,
+  "best optimal is 240×160×160",
+);
+console.log("Void-fill snap:", voidFillSnap!.innerBox, voidFillSnap!.voidFill);
+
+// Without void-fill the same case should not force inserts beyond roundStep
+const noFill = recommendBoxes({ ...presetSachets(), allowVoidFill: false, dividerMm: 0 });
+assert(
+  !noFill.optimal.some(
+    (o) =>
+      o.voidFill &&
+      o.voidFill.dividerMm >= 10 &&
+      ((o.innerBox.lengthMm === 240 && o.innerBox.widthMm === 160) ||
+        (o.innerBox.lengthMm === 160 && o.innerBox.widthMm === 240)),
+  ),
+  "without allowVoidFill model does not invent ~10mm divider for 240×160",
+);
+assert(
+  sachets.optimal.some((o) => o.pallet.exact && o.pallet.alongLength * o.pallet.alongWidth >= 25),
+  "optimal has exact pallet with ≥25/layer (e.g. 5×5)",
+);
 assert(sachets.layouts.length > 1, "multiple layouts enumerated");
 assert(
   sachets.optimal.every(

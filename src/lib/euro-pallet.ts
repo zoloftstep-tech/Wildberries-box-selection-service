@@ -22,6 +22,86 @@ export interface PalletFit {
   summary: string;
 }
 
+function divisors(n: number): number[] {
+  const out: number[] = [];
+  for (let i = 1; i <= n; i++) {
+    if (n % i === 0) out.push(i);
+  }
+  return out;
+}
+
+/** Exact-основания: a | 1200 и b | 800 (практичный диапазон коробок). */
+export function exactPalletBases(): { lengthMm: number; widthMm: number }[] {
+  const out: { lengthMm: number; widthMm: number }[] = [];
+  const seen = new Set<string>();
+  for (const a of divisors(EURO_PALLET_MM.lengthMm)) {
+    for (const b of divisors(EURO_PALLET_MM.widthMm)) {
+      if (a < 80 || b < 80) continue;
+      if (a > 600 || b > 400) continue;
+      const key = `${a}x${b}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ lengthMm: a, widthMm: b });
+    }
+  }
+  return out;
+}
+
+/**
+ * Ближайшее (по площади) exact-основание a×b (a|1200, b|800),
+ * в которое влезает reqL×reqW с поворотом в плоскости.
+ * Длины коробки подписываются под оси товара (length↔reqL, width↔reqW).
+ */
+export function snapToExactPalletBase(
+  reqLengthMm: number,
+  reqWidthMm: number,
+): { lengthMm: number; widthMm: number; fit: PalletFit } | null {
+  const reqL = Math.max(1, reqLengthMm);
+  const reqW = Math.max(1, reqWidthMm);
+  let best: {
+    lengthMm: number;
+    widthMm: number;
+    fit: PalletFit;
+    area: number;
+  } | null = null;
+
+  for (const base of exactPalletBases()) {
+    const a = base.lengthMm; // вдоль 1200
+    const b = base.widthMm; // вдоль 800
+    const fit = evaluateBase(a, b);
+    if (!fit?.exact) continue;
+
+    let lengthMm: number;
+    let widthMm: number;
+    if (a + 0.05 >= reqL && b + 0.05 >= reqW) {
+      lengthMm = a;
+      widthMm = b;
+    } else if (a + 0.05 >= reqW && b + 0.05 >= reqL) {
+      // паллетные оси ↔ товарные: подпись коробки по товару
+      lengthMm = b;
+      widthMm = a;
+    } else if (b + 0.05 >= reqL && a + 0.05 >= reqW) {
+      // на случай если exactPalletBases когда-нибудь отдаст пары иначе
+      lengthMm = b;
+      widthMm = a;
+    } else {
+      continue;
+    }
+
+    const area = a * b;
+    if (!best || area < best.area) {
+      best = { lengthMm, widthMm, fit, area };
+    }
+  }
+
+  if (!best) return null;
+  return {
+    lengthMm: best.lengthMm,
+    widthMm: best.widthMm,
+    fit: best.fit,
+  };
+}
+
 /** baseA вдоль 1200, baseB вдоль 800 */
 function evaluateBase(baseA: number, baseB: number): PalletFit | null {
   const palletL = EURO_PALLET_MM.lengthMm;
@@ -103,6 +183,15 @@ export function bestPalletFit(box: {
   candidates.sort((a, b) => {
     if (a.exact !== b.exact) return a.exact ? -1 : 1;
     if (b.coverage !== a.coverage) return b.coverage - a.coverage;
+    // Среди exact: предпочитаем более широкое основание (240×160 лучше 120×160)
+    if (a.exact && b.exact) {
+      const minA = Math.min(a.baseLengthMm, a.baseWidthMm);
+      const minB = Math.min(b.baseLengthMm, b.baseWidthMm);
+      if (minB !== minA) return minB - minA;
+      const areaA = a.baseLengthMm * a.baseWidthMm;
+      const areaB = b.baseLengthMm * b.baseWidthMm;
+      if (areaB !== areaA) return areaB - areaA;
+    }
     if (b.countPerLayer !== a.countPerLayer) {
       return b.countPerLayer - a.countPerLayer;
     }

@@ -4,11 +4,15 @@
  * Канон = введённые Д×Ш×В (Ø×H). rotateMode: none | planar | full.
  * Score (меньше лучше): паллет exact → coverage; void; tech; поворот от канона;
  * preferred groups −3; maxSide/1000.
- * optimal: только pallet.coverage ≥ 0.90 (или exact). etalon (S=1) всегда.
+ * optimal: только pallet.coverage ≥ 0.90 (или exact). etalon (S=1) всегда лёжа на паллете.
  * Brick: чётные ряды повёрнуты 90° в плоскости, если |span1−span2| ≤ rowMatchTolMm.
  * Cylinder v1: только uniform (без brick).
  */
-import { bestPalletFit, type PalletFit } from "./euro-pallet";
+import {
+  bestPalletFit,
+  snapToExactPalletBase,
+  type PalletFit,
+} from "./euro-pallet";
 import {
   checkTechAccess,
   type TechAccessResult,
@@ -17,6 +21,8 @@ import {
 export type RotateMode = "none" | "planar" | "full";
 export type LayoutPattern = "uniform" | "brick";
 export type LayoutTag = "etalon" | "optimal" | "weak_pallet";
+/** Ось стопки в системе коробки (X=длина, Y=ширина, Z=высота). Эталон — лёжа (x/y). */
+export type StackAxis = "x" | "y" | "z";
 export type LayoutShape = "rect" | "cylinder" | "flat_stack";
 export type LayoutPacking = "tight" | "standard" | "bubble" | "fragile";
 export type LayoutFlatMode = "neat_stack" | "loose_bulk";
@@ -53,9 +59,45 @@ export interface LayoutEnumerateInput {
   roundStepMm?: number;
   maxGroups?: number;
   preferredGroupCounts?: number[];
+  /**
+   * Разрешить вкладыши/заполнение пустот в разумных пределах:
+   * разделитель между стопками, прокладки по бокам / сверху-снизу
+   * (для выхода на exact-паллет и техлимиты).
+   */
+  allowVoidFill?: boolean;
+  /** Макс. суммарный запас по стороне сверх 2×clearance, мм (default 50) */
+  maxSideInsertMm?: number;
+  /** Макс. толщина разделителя между стопками, мм (default 30) */
+  maxDividerMm?: number;
+  /** Макс. запас по высоте сверх стопки+2×clearance, мм (default 80) */
+  maxHeightInsertMm?: number;
+  /** Картонный разделитель: фикс, если void-fill выкл; иначе старт/подсказка */
+  dividerMm?: number;
+  /** @deprecated используйте dividerMm */
   interStackGapMm?: number;
   maxStackHeightMm?: number | null;
   wallThicknessMm?: number;
+  /**
+   * Если true — высота стопки из occupiedVolumeLiters (вспухание).
+   * По умолчанию false: толщина номинальная, объём только для пустот.
+   */
+  inflateStackFromVolume?: boolean;
+  /**
+   * При snap к exact-паллету поднять H, чтобы объём коробки ≥ occupiedVolumeLiters.
+   */
+  fillHeightFromVolume?: boolean;
+}
+
+export interface VoidFillInfo {
+  /** Разделитель между стопками, мм */
+  dividerMm: number;
+  /** Запас по длине сверх 2×clearance, мм */
+  sideInsertLMm: number;
+  /** Запас по ширине сверх 2×clearance, мм */
+  sideInsertWMm: number;
+  /** Запас по высоте сверх стопки+2×clearance, мм */
+  heightInsertMm: number;
+  summary: string;
 }
 
 export interface LayoutCandidate {
@@ -66,6 +108,8 @@ export interface LayoutCandidate {
   ny: number;
   nz: number;
   pattern: LayoutPattern;
+  /** Куда растёт стопка: z=стоя, x/y=лёжа на паллете */
+  stackAxis: StackAxis;
   unitOrient: UnitOrient;
   rotatedFromCanon: boolean;
   productBlock: Dims;
@@ -79,6 +123,7 @@ export interface LayoutCandidate {
   score: number;
   tags: LayoutTag[];
   summary: string;
+  voidFill?: VoidFillInfo;
 }
 
 export interface EnumerateLayoutsResult {
@@ -208,11 +253,13 @@ export function unitOrientations(input: LayoutEnumerateInput): {
   return { canon, orients: permute3(L, W, H) };
 }
 
-/** Эффективная толщина плоской единицы (вспухание из occupiedVolumeLiters). */
+/** Эффективная толщина плоской единицы. */
 export function effectiveThicknessMm(input: LayoutEnumerateInput): number {
   const qty = Math.max(1, Math.floor(input.quantity) || 1);
   const nominal = Math.max(0.1, input.heightMm);
+  const inflate = input.inflateStackFromVolume === true;
   if (
+    inflate &&
     input.shape === "flat_stack" &&
     input.occupiedVolumeLiters != null &&
     input.occupiedVolumeLiters > 0
@@ -223,6 +270,22 @@ export function effectiveThicknessMm(input: LayoutEnumerateInput): number {
     return Math.max(nominal, tEff);
   }
   return nominal;
+}
+
+function stackGapMm(input: LayoutEnumerateInput): number {
+  return Math.max(0, input.dividerMm ?? input.interStackGapMm ?? 0);
+}
+
+/** Между стопками: разделитель; overlap только если разделителя нет. */
+function planePackingGaps(input: LayoutEnumerateInput): {
+  overlapMm: number;
+  gapMm: number;
+} {
+  const gap = stackGapMm(input);
+  if (gap > 0) return { overlapMm: 0, gapMm: gap };
+  const overlap =
+    input.allowOverlap && (input.overlapMm ?? 0) > 0 ? input.overlapMm! : 0;
+  return { overlapMm: overlap, gapMm: 0 };
 }
 
 function spanAxis(
@@ -265,9 +328,23 @@ function scoreLayout(args: {
   rotatedFromCanon: boolean;
   preferred: boolean;
   maxSideMm: number;
+  voidFill?: VoidFillInfo | null;
+  /** Недобор объёма коробки к occupiedVolumeLiters, л */
+  underfillLiters?: number;
+  /** H совпала с стороной основания — удобный «ровный» размер */
+  heightMatchesBase?: boolean;
 }): number {
-  const { pallet, voidRatio, techOk, rotatedFromCanon, preferred, maxSideMm } =
-    args;
+  const {
+    pallet,
+    voidRatio,
+    techOk,
+    rotatedFromCanon,
+    preferred,
+    maxSideMm,
+    voidFill,
+    underfillLiters = 0,
+    heightMatchesBase = false,
+  } = args;
   let score = 0;
   if (pallet.exact) {
     score += 0;
@@ -278,11 +355,117 @@ function scoreLayout(args: {
     score += 120;
   }
   score += voidRatio * 80;
+  score += underfillLiters * 12;
   if (!techOk) score += 8;
   if (rotatedFromCanon) score += 2;
   if (preferred) score -= 3;
+  if (pallet.exact) score -= 12;
+  if (heightMatchesBase) score -= 4;
+  if (voidFill) {
+    // Вкладыши полезны, но лишние мм штрафуем (ищем минимум прокладок)
+    score +=
+      voidFill.sideInsertLMm * 0.12 +
+      voidFill.sideInsertWMm * 0.12 +
+      voidFill.heightInsertMm * 0.08 +
+      voidFill.dividerMm * 0.04;
+  }
   score += maxSideMm / 1000;
   return score;
+}
+
+/** Запас по бокам при лучшем совмещении осей коробки и блока товара. */
+function planarSideInserts(
+  boxL: number,
+  boxW: number,
+  blockL: number,
+  blockW: number,
+  pad: number,
+): { sideInsertLMm: number; sideInsertWMm: number } {
+  const variants = [
+    { l: boxL - blockL - pad, w: boxW - blockW - pad },
+    { l: boxL - blockW - pad, w: boxW - blockL - pad },
+  ];
+  let best: { l: number; w: number } | null = null;
+  for (const v of variants) {
+    if (v.l < -0.05 || v.w < -0.05) continue;
+    const score = Math.max(0, v.l) + Math.max(0, v.w);
+    if (
+      !best ||
+      score < Math.max(0, best.l) + Math.max(0, best.w)
+    ) {
+      best = v;
+    }
+  }
+  if (!best) {
+    return {
+      sideInsertLMm: Math.max(0, boxL - blockL - pad),
+      sideInsertWMm: Math.max(0, boxW - blockW - pad),
+    };
+  }
+  return {
+    sideInsertLMm: Math.max(0, Math.round(best.l * 10) / 10),
+    sideInsertWMm: Math.max(0, Math.round(best.w * 10) / 10),
+  };
+}
+
+/** Длинная сторона основания → length (канон Д×Ш×В). */
+function normalizeBaseOrientation(dims: Dims): Dims {
+  if (dims.lengthMm + 0.05 >= dims.widthMm) return dims;
+  return {
+    lengthMm: dims.widthMm,
+    widthMm: dims.lengthMm,
+    heightMm: dims.heightMm,
+  };
+}
+
+/** Кандидаты высоты при snap: номинал, техминимум, совпадение с основанием, объём. */
+function snapHeightCandidates(args: {
+  reqH: number;
+  baseL: number;
+  baseW: number;
+  maxHeightInsert: number;
+  roundStep: number;
+  fillFromVolume: boolean;
+  liters: number | null;
+}): number[] {
+  const {
+    reqH,
+    baseL,
+    baseW,
+    maxHeightInsert,
+    roundStep,
+    fillFromVolume,
+    liters,
+  } = args;
+  const h0 = Math.max(80, roundUp(reqH, roundStep));
+  const hCap = reqH + maxHeightInsert;
+  const out = new Set<number>();
+  if (h0 <= hCap + 0.05) out.add(h0);
+
+  for (let h = h0; h <= hCap + 0.05; h += roundStep) {
+    if (checkTechAccess(baseL, baseW, h).ok) {
+      out.add(h);
+      break;
+    }
+  }
+
+  for (const side of [baseL, baseW]) {
+    if (side + 0.05 >= reqH && side <= hCap + 0.05) {
+      out.add(side);
+    }
+  }
+
+  if (fillFromVolume && liters != null && liters > 0) {
+    const needH = (liters * 1_000_000) / (baseL * baseW);
+    const capped = Math.min(needH, hCap);
+    if (capped + 0.05 >= reqH) {
+      out.add(Math.max(h0, roundUp(capped, roundStep)));
+    }
+  }
+
+  return [...out]
+    .filter((h) => h + 0.05 >= reqH && h <= hCap + 0.05)
+    .sort((a, b) => a - b);
 }
 
 function buildCandidate(args: {
@@ -302,6 +485,9 @@ function buildCandidate(args: {
   productVolumeLiters: number;
   tEff: number;
   preferredGroupCounts?: number[];
+  stackAxis?: StackAxis;
+  forcedInner?: Dims;
+  dividerMm?: number;
 }): LayoutCandidate {
   const {
     id,
@@ -320,12 +506,14 @@ function buildCandidate(args: {
     productVolumeLiters,
     tEff,
     preferredGroupCounts,
+    stackAxis = "z",
+    forcedInner,
+    dividerMm = 0,
   } = args;
 
-  const innerBox = roundUpDims(
-    addClearanceDims(productBlock, clearanceMm),
-    roundStepMm,
-  );
+  const innerBox =
+    forcedInner ??
+    roundUpDims(addClearanceDims(productBlock, clearanceMm), roundStepMm);
   const outer =
     wallThicknessMm > 0
       ? {
@@ -344,6 +532,7 @@ function buildCandidate(args: {
   const boxVol = volumeLiters(innerBox);
   const voidRatio =
     boxVol > 0 ? Math.max(0, (boxVol - productVolumeLiters) / boxVol) : 1;
+  const underfillLiters = Math.max(0, productVolumeLiters - boxVol);
   const rotatedFromCanon = !sameOrient(unitOrient, canon);
   const preferred = Boolean(
     preferredGroupCounts?.includes(groupCount) && groupCount > 1,
@@ -353,6 +542,48 @@ function buildCandidate(args: {
     innerBox.widthMm,
     innerBox.heightMm,
   );
+
+  const pad = clearanceMm * 2;
+  const { sideInsertLMm, sideInsertWMm } = planarSideInserts(
+    innerBox.lengthMm,
+    innerBox.widthMm,
+    productBlock.lengthMm,
+    productBlock.widthMm,
+    pad,
+  );
+  const heightInsertMm = Math.max(
+    0,
+    Math.round((innerBox.heightMm - productBlock.heightMm - pad) * 10) / 10,
+  );
+  const hasFill =
+    dividerMm > 0.05 ||
+    sideInsertLMm > 0.05 ||
+    sideInsertWMm > 0.05 ||
+    heightInsertMm > 0.05;
+  const voidFill: VoidFillInfo | undefined = hasFill
+    ? {
+        dividerMm,
+        sideInsertLMm,
+        sideInsertWMm,
+        heightInsertMm,
+        summary: [
+          dividerMm > 0.05 ? `разделитель ${dividerMm} мм` : null,
+          sideInsertLMm > 0.05 || sideInsertWMm > 0.05
+            ? `бока +${Math.round(sideInsertLMm)}/+${Math.round(sideInsertWMm)} мм`
+            : null,
+          heightInsertMm > 0.05
+            ? `верх/низ +${Math.round(heightInsertMm)} мм`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      }
+    : undefined;
+
+  const heightMatchesBase =
+    Math.abs(innerBox.heightMm - innerBox.lengthMm) < 0.5 ||
+    Math.abs(innerBox.heightMm - innerBox.widthMm) < 0.5;
+
   const score = scoreLayout({
     pallet,
     voidRatio,
@@ -360,6 +591,9 @@ function buildCandidate(args: {
     rotatedFromCanon,
     preferred,
     maxSideMm,
+    voidFill,
+    underfillLiters,
+    heightMatchesBase,
   });
 
   const tags: LayoutTag[] = [];
@@ -372,7 +606,9 @@ function buildCandidate(args: {
     tags.push("weak_pallet");
   }
 
-  const summary = `${groupCount} гр. · сетка ${nx}×${ny}${nz > 1 ? `×${nz}` : ""} · ${pattern} · ${Math.round(unitOrient.lengthMm)}×${Math.round(unitOrient.widthMm)}×${Math.round(unitOrient.heightMm)}`;
+  const pose = stackAxis === "z" ? "стоя" : "лёжа";
+  const fillNote = voidFill ? ` · вкладыш` : "";
+  const summary = `${groupCount} гр. · ${pose}${fillNote} · сетка ${nx}×${ny}${nz > 1 ? `×${nz}` : ""} · ${pattern} · ${Math.round(unitOrient.lengthMm)}×${Math.round(unitOrient.widthMm)}×${Math.round(unitOrient.heightMm)}`;
 
   return {
     id,
@@ -382,6 +618,7 @@ function buildCandidate(args: {
     ny,
     nz,
     pattern,
+    stackAxis,
     unitOrient,
     rotatedFromCanon,
     productBlock: {
@@ -399,7 +636,71 @@ function buildCandidate(args: {
     score,
     tags,
     summary,
+    voidFill,
   };
+}
+
+/**
+ * Эталон S=1: переводим стоячую стопку в положение «лёжа» (ось стопки в плоскости паллета)
+ * и выбираем ориентацию с лучшим паллетом.
+ */
+export function orientEtalonLying(
+  standing: LayoutCandidate,
+  opts: {
+    clearanceMm: number;
+    roundStepMm: number;
+    wallThicknessMm: number;
+    preferredGroupCounts?: number[];
+    canon: UnitOrient;
+  },
+): LayoutCandidate {
+  const L = standing.productBlock.lengthMm;
+  const W = standing.productBlock.widthMm;
+  const H = standing.productBlock.heightMm;
+
+  // Уже низкая (стопка не выше основания) — оставляем как есть
+  if (H <= Math.max(L, W) + 0.5) {
+    return {
+      ...standing,
+      stackAxis: standing.stackAxis ?? "z",
+      summary: standing.summary.includes("лёжа") || standing.summary.includes("стоя")
+        ? standing.summary
+        : standing.summary.replace("гр. ·", "гр. · стоя ·"),
+    };
+  }
+
+  const tips: { block: Dims; stackAxis: StackAxis }[] = [
+    { block: { lengthMm: L, widthMm: H, heightMm: W }, stackAxis: "y" },
+    { block: { lengthMm: H, widthMm: W, heightMm: L }, stackAxis: "x" },
+    { block: { lengthMm: W, widthMm: H, heightMm: L }, stackAxis: "y" },
+    { block: { lengthMm: H, widthMm: L, heightMm: W }, stackAxis: "x" },
+  ];
+
+  let best: LayoutCandidate | null = null;
+  for (const tip of tips) {
+    const cand = buildCandidate({
+      id: `${standing.id}-lying-${tip.stackAxis}`,
+      groupCount: standing.groupCount,
+      perStack: standing.perStack,
+      nx: standing.nx,
+      ny: standing.ny,
+      nz: standing.nz,
+      pattern: standing.pattern,
+      unitOrient: standing.unitOrient,
+      canon: opts.canon,
+      productBlock: tip.block,
+      clearanceMm: opts.clearanceMm,
+      roundStepMm: opts.roundStepMm,
+      wallThicknessMm: opts.wallThicknessMm,
+      productVolumeLiters: standing.productVolumeLiters,
+      tEff: standing.tEff,
+      preferredGroupCounts: opts.preferredGroupCounts,
+      stackAxis: tip.stackAxis,
+    });
+    if (!best || cand.score < best.score) best = cand;
+  }
+
+  return best ?? standing;
 }
 
 /** Footprint в плоскости; brick отклоняется, если ряды не сходятся по длине. */
@@ -433,6 +734,22 @@ export function planeFootprint(
   return { lengthMm: spanX, widthMm: y };
 }
 
+function dividerCandidates(input: LayoutEnumerateInput): number[] {
+  if (input.allowVoidFill) {
+    const maxD = Math.max(0, input.maxDividerMm ?? 30);
+    const steps: number[] = [0];
+    for (let d = 5; d <= maxD; d += 5) steps.push(d);
+    if (maxD > 0 && !steps.includes(maxD)) steps.push(maxD);
+    // если задан dividerMm — тоже попробуем
+    const hint = input.dividerMm ?? input.interStackGapMm;
+    if (hint != null && hint > 0 && hint <= maxD && !steps.includes(hint)) {
+      steps.push(hint);
+    }
+    return [...new Set(steps)].sort((a, b) => a - b);
+  }
+  return [stackGapMm(input)];
+}
+
 function enumerateFlat(
   input: LayoutEnumerateInput,
   canon: UnitOrient,
@@ -441,9 +758,6 @@ function enumerateFlat(
 ): LayoutCandidate[] {
   const qty = Math.max(1, Math.floor(input.quantity) || 1);
   const maxGroups = Math.max(1, Math.min(input.maxGroups ?? 6, qty));
-  const overlap =
-    input.allowOverlap && (input.overlapMm ?? 0) > 0 ? input.overlapMm! : 0;
-  const gap = input.interStackGapMm ?? 0;
   const tol = input.rowMatchTolMm ?? 8;
   const roundStep = input.roundStepMm ?? 5;
   const wall = input.wallThicknessMm ?? 0;
@@ -459,65 +773,80 @@ function enumerateFlat(
     ? [1]
     : Array.from({ length: maxGroups }, (_, i) => i + 1);
 
+  const dividers = dividerCandidates(input);
+  const overlapOnly =
+    !input.allowVoidFill &&
+    input.allowOverlap &&
+    (input.overlapMm ?? 0) > 0 &&
+    stackGapMm(input) <= 0
+      ? input.overlapMm!
+      : 0;
+
   const out: LayoutCandidate[] = [];
   let seq = 0;
 
-  for (const orient of orients) {
-    const footL = orient.lengthMm;
-    const footW = orient.widthMm;
+  for (const divider of dividers) {
+    const overlap = divider > 0 ? 0 : overlapOnly;
+    const gap = divider;
 
-    for (const S of groupCounts) {
-      const k = Math.ceil(qty / S);
-      const stackH = k * tEff;
-      if (maxH != null && stackH > maxH) continue;
+    for (const orient of orients) {
+      const footL = orient.lengthMm;
+      const footW = orient.widthMm;
 
-      for (const [nx, ny] of gridsForGroups(S)) {
-        for (const pattern of ["uniform", "brick"] as LayoutPattern[]) {
-          const fp = planeFootprint(
-            footL,
-            footW,
-            nx,
-            ny,
-            pattern,
-            overlap,
-            gap,
-            tol,
-          );
-          if (!fp) continue;
+      for (const S of groupCounts) {
+        const k = Math.ceil(qty / S);
+        const stackH = k * tEff;
+        if (maxH != null && stackH > maxH) continue;
 
-          seq += 1;
-          out.push(
-            buildCandidate({
-              id: `flat-${seq}-${S}-${nx}x${ny}-${pattern}`,
-              groupCount: S,
-              perStack: k,
+        for (const [nx, ny] of gridsForGroups(S)) {
+          for (const pattern of ["uniform", "brick"] as LayoutPattern[]) {
+            const fp = planeFootprint(
+              footL,
+              footW,
               nx,
               ny,
-              nz: 1,
               pattern,
-              unitOrient: {
-                lengthMm: footL,
-                widthMm: footW,
-                heightMm: tEff,
-              },
-              canon: {
-                lengthMm: canon.lengthMm,
-                widthMm: canon.widthMm,
-                heightMm: tEff,
-              },
-              productBlock: {
-                lengthMm: fp.lengthMm,
-                widthMm: fp.widthMm,
-                heightMm: stackH,
-              },
-              clearanceMm,
-              roundStepMm: roundStep,
-              wallThicknessMm: wall,
-              productVolumeLiters,
-              tEff,
-              preferredGroupCounts: input.preferredGroupCounts,
-            }),
-          );
+              overlap,
+              gap,
+              tol,
+            );
+            if (!fp) continue;
+
+            seq += 1;
+            out.push(
+              buildCandidate({
+                id: `flat-${seq}-d${divider}-${S}-${nx}x${ny}-${pattern}`,
+                groupCount: S,
+                perStack: k,
+                nx,
+                ny,
+                nz: 1,
+                pattern,
+                unitOrient: {
+                  lengthMm: footL,
+                  widthMm: footW,
+                  heightMm: tEff,
+                },
+                canon: {
+                  lengthMm: canon.lengthMm,
+                  widthMm: canon.widthMm,
+                  heightMm: tEff,
+                },
+                productBlock: {
+                  lengthMm: fp.lengthMm,
+                  widthMm: fp.widthMm,
+                  heightMm: stackH,
+                },
+                clearanceMm,
+                roundStepMm: roundStep,
+                wallThicknessMm: wall,
+                productVolumeLiters,
+                tEff,
+                preferredGroupCounts: input.preferredGroupCounts,
+                dividerMm: divider,
+              }),
+            );
+          }
         }
       }
     }
@@ -534,9 +863,7 @@ function enumerateRect(
 ): LayoutCandidate[] {
   const qty = Math.max(1, Math.floor(input.quantity) || 1);
   const maxGroups = Math.max(1, Math.min(input.maxGroups ?? 6, qty));
-  const overlap =
-    input.allowOverlap && (input.overlapMm ?? 0) > 0 ? input.overlapMm! : 0;
-  const gap = input.interStackGapMm ?? 0;
+  const { overlapMm: overlap, gapMm: gap } = planePackingGaps(input);
   const tol = input.rowMatchTolMm ?? 8;
   const roundStep = input.roundStepMm ?? 5;
   const wall = input.wallThicknessMm ?? 0;
@@ -612,7 +939,7 @@ function enumerateCylinder(
 ): LayoutCandidate[] {
   const qty = Math.max(1, Math.floor(input.quantity) || 1);
   const maxGroups = Math.max(1, Math.min(input.maxGroups ?? 6, qty));
-  const gap = input.interStackGapMm ?? 0;
+  const gap = stackGapMm(input);
   const roundStep = input.roundStepMm ?? 5;
   const wall = input.wallThicknessMm ?? 0;
   const maxH = input.maxStackHeightMm ?? null;
@@ -689,6 +1016,128 @@ function dedupeLayouts(list: LayoutCandidate[]): LayoutCandidate[] {
 }
 
 /**
+ * Snap к exact-паллету с лимитами вкладышей (бока / высота).
+ * Без allowVoidFill — только если запас ≤ roundStep (почти без прокладок).
+ * Высота из объёма — только при fillHeightFromVolume (не из allowVoidFill).
+ */
+export function snapLayoutsToExactPallet(
+  layouts: LayoutCandidate[],
+  input: LayoutEnumerateInput,
+  clearanceMm: number,
+  canon: UnitOrient,
+): LayoutCandidate[] {
+  const allowFill = input.allowVoidFill === true;
+  const maxSide = allowFill ? (input.maxSideInsertMm ?? 50) : 5;
+  const maxHeight = allowFill ? (input.maxHeightInsertMm ?? 80) : 5;
+  const roundStep = input.roundStepMm ?? 5;
+  const wall = input.wallThicknessMm ?? 0;
+  const fillVol = input.fillHeightFromVolume === true;
+  const liters =
+    input.occupiedVolumeLiters != null && input.occupiedVolumeLiters > 0
+      ? input.occupiedVolumeLiters
+      : null;
+  const extra: LayoutCandidate[] = [];
+
+  for (const layout of layouts) {
+    if (layout.groupCount < 1) continue;
+    const pad = clearanceMm * 2;
+    const reqL = layout.productBlock.lengthMm + pad;
+    const reqW = layout.productBlock.widthMm + pad;
+    const reqH = layout.productBlock.heightMm + pad;
+
+    const snap = snapToExactPalletBase(reqL, reqW);
+    if (!snap) continue;
+
+    // Подпись: длинная сторона основания → length (240×160, не 160×240)
+    const base = normalizeBaseOrientation({
+      lengthMm: snap.lengthMm,
+      widthMm: snap.widthMm,
+      heightMm: 0,
+    });
+
+    const sides = planarSideInserts(
+      base.lengthMm,
+      base.widthMm,
+      layout.productBlock.lengthMm,
+      layout.productBlock.widthMm,
+      pad,
+    );
+    if (
+      sides.sideInsertLMm > maxSide + 0.05 ||
+      sides.sideInsertWMm > maxSide + 0.05
+    ) {
+      continue;
+    }
+
+    if (
+      Math.abs(base.lengthMm - layout.innerBox.lengthMm) < 0.5 &&
+      Math.abs(base.widthMm - layout.innerBox.widthMm) < 0.5 &&
+      layout.pallet.exact
+    ) {
+      continue;
+    }
+
+    const heights = snapHeightCandidates({
+      reqH,
+      baseL: base.lengthMm,
+      baseW: base.widthMm,
+      maxHeightInsert: maxHeight,
+      roundStep,
+      fillFromVolume: fillVol,
+      liters,
+    });
+
+    const dividerMm = layout.voidFill?.dividerMm ?? 0;
+
+    for (const h of heights) {
+      const forcedInner: Dims = {
+        lengthMm: base.lengthMm,
+        widthMm: base.widthMm,
+        heightMm: h,
+      };
+
+      if (
+        !(
+          (forcedInner.lengthMm + 0.05 >= reqL &&
+            forcedInner.widthMm + 0.05 >= reqW) ||
+          (forcedInner.lengthMm + 0.05 >= reqW &&
+            forcedInner.widthMm + 0.05 >= reqL)
+        ) ||
+        forcedInner.heightMm + 0.05 < reqH
+      ) {
+        continue;
+      }
+
+      extra.push(
+        buildCandidate({
+          id: `${layout.id}-pallet-snap-h${h}`,
+          groupCount: layout.groupCount,
+          perStack: layout.perStack,
+          nx: layout.nx,
+          ny: layout.ny,
+          nz: layout.nz,
+          pattern: layout.pattern,
+          unitOrient: layout.unitOrient,
+          canon,
+          productBlock: layout.productBlock,
+          clearanceMm,
+          roundStepMm: roundStep,
+          wallThicknessMm: wall,
+          productVolumeLiters: layout.productVolumeLiters,
+          tEff: layout.tEff,
+          preferredGroupCounts: input.preferredGroupCounts,
+          stackAxis: layout.stackAxis,
+          forcedInner,
+          dividerMm,
+        }),
+      );
+    }
+  }
+
+  return extra;
+}
+
+/**
  * Полный перебор укладок + классификация etalon / optimal.
  */
 export function enumerateLayouts(
@@ -740,7 +1189,8 @@ export function enumerateLayouts(
     ];
   }
 
-  const layouts = dedupeLayouts(raw);
+  const snapped = snapLayoutsToExactPallet(raw, input, clearanceMm, canon);
+  const layouts = dedupeLayouts([...raw, ...snapped]);
   layouts.sort((a, b) => a.score - b.score);
 
   const singles = layouts.filter((c) => c.groupCount === 1);
@@ -750,14 +1200,21 @@ export function enumerateLayouts(
     }
     return a.score - b.score;
   });
-  const etalon = { ...(singles[0] ?? layouts[0]!) };
+  const standingEtalon = singles[0] ?? layouts[0]!;
+  const etalon = orientEtalonLying(standingEtalon, {
+    clearanceMm,
+    roundStepMm: input.roundStepMm ?? 5,
+    wallThicknessMm: input.wallThicknessMm ?? 0,
+    preferredGroupCounts: input.preferredGroupCounts,
+    canon,
+  });
   etalon.tags = [
     ...etalon.tags.filter((t) => t !== "etalon"),
     "etalon",
   ];
 
   const optimalRaw = layouts
-    .filter((c) => c.id !== etalon.id)
+    .filter((c) => c.id !== standingEtalon.id && c.id !== etalon.id)
     .filter(
       (c) =>
         c.pallet.ok &&
