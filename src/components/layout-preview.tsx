@@ -119,10 +119,105 @@ function visualInset(sizeMm: number): number {
   return Math.min(sizeMm * 0.12, Math.max(0.6, sizeMm * 0.08));
 }
 
+/** Повернуть/отцентрировать контент под innerBox (L×W×H коробки). */
+function placeContentInBox<T extends { x: number; y: number; z: number; l: number; w: number; h: number }>(
+  items: T[],
+  box: { lengthMm: number; widthMm: number; heightMm: number },
+): T[] {
+  if (items.length === 0) return items;
+
+  const aabb = (list: T[]) => {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const i of list) {
+      minX = Math.min(minX, i.x - i.l / 2);
+      maxX = Math.max(maxX, i.x + i.l / 2);
+      minY = Math.min(minY, i.y - i.w / 2);
+      maxY = Math.max(maxY, i.y + i.w / 2);
+      minZ = Math.min(minZ, i.z - i.h / 2);
+      maxZ = Math.max(maxZ, i.z + i.h / 2);
+    }
+    return { minX, maxX, minY, maxY, minZ, maxZ };
+  };
+
+  const scoreFit = (list: T[]) => {
+    const a = aabb(list);
+    const L = a.maxX - a.minX;
+    const W = a.maxY - a.minY;
+    const H = a.maxZ - a.minZ;
+    const ox = Math.max(0, L - box.lengthMm);
+    const oy = Math.max(0, W - box.widthMm);
+    const oz = Math.max(0, H - box.heightMm);
+    return ox * ox + oy * oy + oz * oz;
+  };
+
+  const swapXY = (list: T[]): T[] =>
+    list.map((i) => ({
+      ...i,
+      x: i.y,
+      y: -i.x,
+      l: i.w,
+      w: i.l,
+    }));
+
+  let best = items;
+  let bestScore = scoreFit(best);
+  const swapped = swapXY(items);
+  const swapScore = scoreFit(swapped);
+  if (swapScore + 1e-6 < bestScore) {
+    best = swapped;
+    bestScore = swapScore;
+  }
+
+  // Центр в коробке
+  const a = aabb(best);
+  const cx = (a.minX + a.maxX) / 2;
+  const cy = (a.minY + a.maxY) / 2;
+  const cz = (a.minZ + a.maxZ) / 2;
+  let placed = best.map((i) => ({
+    ...i,
+    x: i.x - cx,
+    y: i.y - cy,
+    z: i.z - cz,
+  }));
+
+  // Если всё ещё не влезает — равномерный scale вниз
+  const a2 = aabb(placed);
+  const sx =
+    a2.maxX - a2.minX > box.lengthMm + 0.05
+      ? box.lengthMm / (a2.maxX - a2.minX)
+      : 1;
+  const sy =
+    a2.maxY - a2.minY > box.widthMm + 0.05
+      ? box.widthMm / (a2.maxY - a2.minY)
+      : 1;
+  const sz =
+    a2.maxZ - a2.minZ > box.heightMm + 0.05
+      ? box.heightMm / (a2.maxZ - a2.minZ)
+      : 1;
+  const s = Math.min(sx, sy, sz, 1);
+  if (s < 0.999) {
+    placed = placed.map((i) => ({
+      ...i,
+      x: i.x * s,
+      y: i.y * s,
+      z: i.z * s,
+      l: i.l * s,
+      w: i.w * s,
+      h: i.h * s,
+    }));
+  }
+  return placed;
+}
+
 /**
  * Ровно `quantity` единиц.
  * Позиции и шаг = как в enumerate (overlap/gap на обеих осях плоскости).
- * stackAxis x/y — стопка лёжа (эталон на паллете).
+ * stackAxis x/y — стопка лёжа.
  */
 export function buildUnitInstances(
   layout: LayoutCandidate,
@@ -272,8 +367,8 @@ export function buildUnitInstances(
     }));
   }
 
-  const fitted = fitIntoBlock(instances, productBlock);
-  return fitted.slice(0, qty);
+  // Сначала влезаем в productBlock; выравнивание под коробку — в Scene вместе с разделителем
+  return fitIntoBlock(instances, productBlock).slice(0, qty);
 }
 
 /** Масштаб только если AABB > productBlock. */
@@ -481,14 +576,54 @@ function Scene({
   overlapMm: number;
   gapMm: number;
 }) {
-  const units = useMemo(
-    () => buildUnitInstances(layout, quantity, overlapMm, gapMm),
-    [layout, quantity, overlapMm, gapMm],
-  );
-  const dividers = useMemo(
-    () => buildDividerInstances(layout, gapMm),
-    [layout, gapMm],
-  );
+  const { units, dividers } = useMemo(() => {
+    const rawUnits = buildUnitInstances(layout, quantity, overlapMm, gapMm);
+    const rawDivs = buildDividerInstances(layout, gapMm);
+    type Tagged = {
+      x: number;
+      y: number;
+      z: number;
+      l: number;
+      w: number;
+      h: number;
+      kind: "u" | "d";
+      rotY?: number;
+      tone?: 0 | 1;
+    };
+    const tagged: Tagged[] = [
+      ...rawUnits.map((u) => ({ ...u, kind: "u" as const })),
+      ...rawDivs.map((d) => ({ ...d, kind: "d" as const })),
+    ];
+    const placed = placeContentInBox(tagged, layout.innerBox);
+    return {
+      units: placed
+        .filter((p) => p.kind === "u")
+        .map(
+          (p): UnitInstance => ({
+            x: p.x,
+            y: p.y,
+            z: p.z,
+            l: p.l,
+            w: p.w,
+            h: p.h,
+            rotY: p.rotY ?? 0,
+            tone: (p.tone ?? 0) as 0 | 1,
+          }),
+        ),
+      dividers: placed
+        .filter((p) => p.kind === "d")
+        .map(
+          (p): DividerInstance => ({
+            x: p.x,
+            y: p.y,
+            z: p.z,
+            l: p.l,
+            w: p.w,
+            h: p.h,
+          }),
+        ),
+    };
+  }, [layout, quantity, overlapMm, gapMm]);
   const box = layout.innerBox;
   const maxSide = Math.max(box.lengthMm, box.widthMm, box.heightMm);
 
