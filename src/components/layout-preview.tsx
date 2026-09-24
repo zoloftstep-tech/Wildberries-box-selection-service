@@ -54,6 +54,65 @@ function spanAxis(
   return unitMm * n + Math.max(0, gapMm) * (n - 1);
 }
 
+export interface DividerInstance {
+  x: number;
+  y: number;
+  z: number;
+  l: number;
+  w: number;
+  h: number;
+}
+
+/** Пластины разделителя между стопками (другой цвет в 3D). */
+export function buildDividerInstances(
+  layout: LayoutCandidate,
+  gapMm: number,
+): DividerInstance[] {
+  const gap = Math.max(0, gapMm);
+  if (gap < 0.5) return [];
+  const { nx, ny, pattern, unitOrient, productBlock, groupCount } = layout;
+  if (pattern === "brick") return []; // упрощение: только uniform
+  const S = Math.max(1, Math.min(groupCount, nx * ny));
+  if (S < 2) return [];
+
+  const uL = Math.max(0.5, unitOrient.lengthMm);
+  const uW = Math.max(0.5, unitOrient.widthMm);
+  const blockH = Math.max(1, productBlock.heightMm);
+  const out: DividerInstance[] = [];
+
+  if (nx > 1) {
+    const spanX = spanAxis(uL, nx, 0, gap);
+    const pitchX = uL + gap;
+    const start = -spanX / 2 + uL;
+    for (let i = 0; i < nx - 1; i++) {
+      out.push({
+        x: start + i * pitchX + gap / 2,
+        y: 0,
+        z: 0,
+        l: gap * 0.85,
+        w: Math.min(productBlock.widthMm, spanAxis(uW, ny, 0, gap)),
+        h: blockH * 0.92,
+      });
+    }
+  }
+  if (ny > 1 && nx === 1) {
+    const spanY = spanAxis(uW, ny, 0, gap);
+    const pitchY = uW + gap;
+    const start = -spanY / 2 + uW;
+    for (let i = 0; i < ny - 1; i++) {
+      out.push({
+        x: 0,
+        y: start + i * pitchY + gap / 2,
+        z: 0,
+        l: Math.min(productBlock.lengthMm, uL),
+        w: gap * 0.85,
+        h: blockH * 0.92,
+      });
+    }
+  }
+  return out;
+}
+
 /** Визуальный зазор между соседними единицами (не влияет на расчёт коробки). */
 function visualInset(sizeMm: number): number {
   // 8–12% или минимум 0.6 мм — чтобы тонкие пакетики (~4 мм) тоже разделялись
@@ -391,6 +450,24 @@ function UnitInstances({
   );
 }
 
+function DividerMeshes({ items }: { items: DividerInstance[] }) {
+  if (items.length === 0) return null;
+  return (
+    <group>
+      {items.map((d, i) => (
+        <mesh key={i} position={[d.x, d.y, d.z]}>
+          <boxGeometry args={[d.l, d.w, d.h]} />
+          <meshStandardMaterial
+            color="#c45c26"
+            roughness={0.65}
+            metalness={0.02}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function Scene({
   layout,
   shape,
@@ -407,6 +484,10 @@ function Scene({
   const units = useMemo(
     () => buildUnitInstances(layout, quantity, overlapMm, gapMm),
     [layout, quantity, overlapMm, gapMm],
+  );
+  const dividers = useMemo(
+    () => buildDividerInstances(layout, gapMm),
+    [layout, gapMm],
   );
   const box = layout.innerBox;
   const maxSide = Math.max(box.lengthMm, box.widthMm, box.heightMm);
@@ -431,6 +512,7 @@ function Scene({
           heightMm={box.heightMm}
         />
         <UnitInstances units={units} shape={shape} />
+        <DividerMeshes items={dividers} />
       </group>
 
       <OrbitControls makeDefault enablePan />
@@ -507,6 +589,7 @@ export function LayoutPreview({
       <p className="border-t border-[var(--line)] px-3 py-1.5 text-[11px] text-[var(--muted)]">
         {unitCount} ед. · габарит единицы {unitSizeLabel}
         {overlapMm > 0 ? ` · наложение ${overlapMm} мм` : ""}
+        {gapMm > 0.5 ? ` · разделитель ${gapMm} мм` : ""}
         {" · "}
         коробка {box.lengthMm}×{box.widthMm}×{box.heightMm} мм
       </p>

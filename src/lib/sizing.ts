@@ -28,7 +28,7 @@ import {
 export type ProductShape = "rect" | "cylinder" | "flat_stack";
 
 /** Плоский товар: аккуратная стопка или россыпь/слойная укладка. */
-export type FlatLayout = "neat_stack" | "loose_bulk";
+export type FlatLayout = "neat_stack" | "stacks" | "layers" | "loose_bulk";
 
 export type PackingMode = "tight" | "standard" | "bubble" | "fragile";
 
@@ -47,54 +47,30 @@ export interface ProductInput {
   quantity: number;
   weightKg?: number | null;
   packing: PackingMode;
-  /** Только flat_stack: стопка или врассыпную / слоями */
+  /** flat_stack: neat_stack | stacks (2/4/6/8) | layers; loose_bulk → stacks */
   flatLayout?: FlatLayout;
-  /**
-   * Занимаемый объём, л — вторичная проверка (россыпь «вспухает»).
-   * Не задаёт размер коробки сам по себе.
-   */
   occupiedVolumeLiters?: number | null;
-  /** Разрешить небольшое наложение единиц в плоскости (сжимает габарит). */
   allowOverlap?: boolean;
-  /** Нахлёст на стык, мм (пример: 2×105 → 210 без, ~190–195 при 15 мм). */
   overlapMm?: number;
-  /**
-   * Поворот единицы относительно канона Д×Ш×В / Ø×H.
-   * none — только канон; planar — Д↔Ш; full — любые оси (цилиндр на бок).
-   */
   rotateMode?: RotateMode;
-  /** Допуск совпадения длины brick-рядов, мм */
   rowMatchTolMm?: number;
-  /** Шаг округления внутренней коробки вверх, мм */
   roundStepMm?: number;
-  /** Макс. число стопок/групп в плоскости (1…N) */
   maxGroups?: number;
-  /** Soft boost в score для этих groupCount (обычно 2…6) */
   preferredGroupCounts?: number[];
-  /** Картонный разделитель: фикс при void-fill выкл; иначе модель подбирает */
+  /** Допуск разделителя между стопками */
+  allowDivider?: boolean;
+  /** @deprecated → allowDivider */
+  allowVoidFill?: boolean;
+  maxDividerMm?: number;
   dividerMm?: number;
   /** @deprecated → dividerMm */
   interStackGapMm?: number;
-  /** Отсев слишком высоких столбиков, мм */
   maxStackHeightMm?: number | null;
-  /** Толщина стенки (паллет по outer = inner + 2×wall); v1 обычно 0 */
   wallThicknessMm?: number;
-  /** Раздувать высоту стопки из occupiedVolumeLiters (по умолчанию нет) */
   inflateStackFromVolume?: boolean;
-  /** При snap к exact-паллету поднять H под объём россыпи */
   fillHeightFromVolume?: boolean;
-  /**
-   * Разрешить вкладыши: разделитель, бока, верх/низ — в разумных пределах.
-   * Модель сама подбирает толщины под exact-паллет и техлимиты.
-   */
-  allowVoidFill?: boolean;
-  maxSideInsertMm?: number;
-  maxDividerMm?: number;
-  maxHeightInsertMm?: number;
-  /**
-   * Каталог/custom считать от этой укладки (id из layouts).
-   * По умолчанию — эталон.
-   */
+  preferExactPallet?: boolean;
+  maxVolumeUnderfillLiters?: number | null;
   selectedLayoutId?: string | null;
 }
 
@@ -158,17 +134,11 @@ export interface SizingResult {
   productBlock: Dims;
   requiredInner: Dims;
   clearanceMm: number;
-  /** Геометрический или заявленный объём для справки, л */
   occupiedVolumeLiters: number;
-  /** Детали сетки (только flat_stack, legacy) */
   flatPack: FlatPackInfo | null;
-  /** Все уникальные кандидаты укладки */
   layouts: LayoutCandidate[];
-  /** Эталон: 1 стопка / 1 группа в каноне (предпочтительно) */
-  etalon: LayoutCandidate;
-  /** Оптимальные: паллет ≥90%, отсортированы по score */
-  optimal: LayoutCandidate[];
-  /** Укладка, от которой посчитаны catalog/custom */
+  /** Лучшие укладки: [0] = выбранная по умолчанию, далее альтернативы */
+  ranked: LayoutCandidate[];
   selectedLayout: LayoutCandidate;
   recommendations: BoxRecommendation[];
   custom: BoxRecommendation;
@@ -687,27 +657,26 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     rowMatchTolMm: input.rowMatchTolMm,
     roundStepMm: input.roundStepMm,
     maxGroups: input.maxGroups,
-    preferredGroupCounts: input.preferredGroupCounts,
+    preferredGroupCounts: input.preferredGroupCounts ?? [2, 4, 6, 8],
     dividerMm: input.dividerMm,
     interStackGapMm: input.interStackGapMm,
     maxStackHeightMm: input.maxStackHeightMm,
     wallThicknessMm: input.wallThicknessMm,
     inflateStackFromVolume: input.inflateStackFromVolume,
     fillHeightFromVolume: input.fillHeightFromVolume,
-    allowVoidFill: input.allowVoidFill,
-    maxSideInsertMm: input.maxSideInsertMm,
+    allowDivider: input.allowDivider ?? input.allowVoidFill,
     maxDividerMm: input.maxDividerMm,
-    maxHeightInsertMm: input.maxHeightInsertMm,
+    preferExactPallet: input.preferExactPallet,
+    maxVolumeUnderfillLiters: input.maxVolumeUnderfillLiters,
   });
 
+  const best = enumResult.ranked[0] ?? enumResult.layouts[0]!;
   const selectedLayout =
     (input.selectedLayoutId
       ? enumResult.layouts.find((l) => l.id === input.selectedLayoutId) ??
-        enumResult.optimal.find((l) => l.id === input.selectedLayoutId) ??
-        (enumResult.etalon.id === input.selectedLayoutId
-          ? enumResult.etalon
-          : null)
-      : null) ?? enumResult.etalon;
+        enumResult.ranked.find((l) => l.id === input.selectedLayoutId) ??
+        null
+      : null) ?? best;
 
   const productBlock = selectedLayout.productBlock;
   const requiredInner = selectedLayout.innerBox;
@@ -738,16 +707,21 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     );
   }
   if (input.shape === "flat_stack") {
-    const layout = input.flatLayout ?? "neat_stack";
+    const layout = input.flatLayout ?? "stacks";
     notes.push(
       layout === "neat_stack"
-        ? `Аккуратная стопка: перебор укладок с S=1 (эталон) и сравнением.`
-        : `Слои/россыпь: перебор 1…${input.maxGroups ?? 6} стопок, uniform/brick.`,
+        ? "Аккуратная стопка (S=1)."
+        : layout === "layers"
+          ? "Слои врассыпную: сетка в плоскости × слои по высоте, без разделителя."
+          : "Стопки: перебор 2/4/6/8 групп.",
     );
     if (input.allowOverlap && (input.overlapMm ?? 0) > 0) {
       notes.push(
         `Наложение ${input.overlapMm} мм на стык в плоскости укладки.`,
       );
+    }
+    if (input.allowDivider ?? input.allowVoidFill) {
+      notes.push("Разрешён разделитель между стопками (модель подбирает толщину).");
     }
   }
   notes.push(
@@ -768,7 +742,7 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     notes.push("Заложен запас под слой пузырчатой плёнки.");
   }
   notes.push(
-    "Приоритет: укладка → паллет (≥90% в «оптимальных») → пустоты → техдоступ. Эталон (1 стопка) всегда.",
+    "Приоритет: паллет (exact) → пустоты → техдоступ → минимум разделителя.",
   );
 
   const customDims = requiredInner;
@@ -782,10 +756,7 @@ export function recommendBoxes(input: ProductInput): SizingResult {
   const custom = makeRecommendation("custom", customBox, fitCtx, weight)!;
 
   let customTech: BoxRecommendation | null = null;
-  // Tech custom from best optimal (or etalon) that already passes tech, else search
-  const techFromLayouts = [enumResult.etalon, ...enumResult.optimal].find(
-    (l) => l.tech.ok,
-  );
+  const techFromLayouts = enumResult.ranked.find((l) => l.tech.ok);
   if (
     techFromLayouts &&
     (techFromLayouts.innerBox.lengthMm !== customDims.lengthMm ||
@@ -845,7 +816,9 @@ export function recommendBoxes(input: ProductInput): SizingResult {
 
   if (
     input.shape === "flat_stack" &&
-    input.flatLayout === "loose_bulk" &&
+    (input.flatLayout === "loose_bulk" ||
+      input.flatLayout === "stacks" ||
+      input.flatLayout === "layers") &&
     input.occupiedVolumeLiters != null &&
     input.occupiedVolumeLiters > 0
   ) {
@@ -885,7 +858,7 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     heightMm: 80,
   });
   const palletHint = !bad300.exact
-    ? `Пример: 300×300×80 проходит сторону/сумму WB, но на европаллете 1200×800 даёт ${bad300.alongLength}×${bad300.alongWidth} с остатком ${bad300.leftoverLengthMm || bad300.leftoverWidthMm} мм (покрытие ${Math.round(bad300.coverage * 100)}%) — часто отклоняют при паллетировании. В «оптимальных» скрываем покрытие <90%.`
+    ? `Пример: 300×300×80 проходит сторону/сумму WB, но на европаллете 1200×800 даёт ${bad300.alongLength}×${bad300.alongWidth} с остатком ${bad300.leftoverLengthMm || bad300.leftoverWidthMm} мм (покрытие ${Math.round(bad300.coverage * 100)}%).`
     : null;
 
   const techHint =
@@ -898,8 +871,7 @@ export function recommendBoxes(input: ProductInput): SizingResult {
     occupiedVolumeLiters,
     flatPack,
     layouts: enumResult.layouts,
-    etalon: enumResult.etalon,
-    optimal: enumResult.optimal,
+    ranked: enumResult.ranked,
     selectedLayout,
     recommendations: top,
     custom,
@@ -911,29 +883,28 @@ export function recommendBoxes(input: ProductInput): SizingResult {
   };
 }
 
-/** Текущий кейс: 100 пакетиков, укладка с наложением; 6,6 л — вторичная проверка. */
+/** Кейс: 100 пакетиков 150×105×1.5, стопки, без нахлёста, допуск разделителя. */
 export function presetSachets(): ProductInput {
   return {
     shape: "flat_stack",
-    flatLayout: "loose_bulk",
+    flatLayout: "stacks",
     lengthMm: 150,
     widthMm: 105,
     heightMm: 1.5,
     quantity: 100,
     occupiedVolumeLiters: 6.6,
-    allowOverlap: true,
-    overlapMm: 15,
+    allowOverlap: false,
+    overlapMm: 0,
     rotateMode: "none",
     dividerMm: 0,
-    allowVoidFill: true,
+    allowDivider: true,
     maxDividerMm: 30,
-    maxSideInsertMm: 50,
-    maxHeightInsertMm: 80,
     inflateStackFromVolume: false,
     fillHeightFromVolume: false,
+    preferExactPallet: true,
     weightKg: null,
     packing: "standard",
-    preferredGroupCounts: [2, 4],
+    preferredGroupCounts: [2, 4, 6, 8],
   };
 }
 

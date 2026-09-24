@@ -80,13 +80,18 @@ const SHAPE_OPTIONS: { id: ProductShape; title: string; hint: string }[] = [
 const FLAT_LAYOUT_OPTIONS: { id: FlatLayout; title: string; hint: string }[] = [
   {
     id: "neat_stack",
-    title: "Стопка",
-    hint: "Плотно друг на друга по толщине",
+    title: "Одна стопка",
+    hint: "Плотно друг на друга",
   },
   {
-    id: "loose_bulk",
-    title: "Слои / россыпь",
-    hint: "Сетка в плоскости + опц. наложение",
+    id: "stacks",
+    title: "Стопки 2/4/6/8",
+    hint: "Несколько вертикальных групп",
+  },
+  {
+    id: "layers",
+    title: "Слои",
+    hint: "Врассыпную: сетка × слои, без разделителя",
   },
 ];
 
@@ -95,10 +100,14 @@ function num(v: string, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function isBulkFlat(layout: FlatLayout): boolean {
+  return layout === "stacks" || layout === "layers" || layout === "loose_bulk";
+}
+
 export function BoxCalculator() {
   const [shape, setShape] = useState<ProductShape>("flat_stack");
-  const [flatLayout, setFlatLayout] = useState<FlatLayout>("loose_bulk");
-  const [allowOverlap, setAllowOverlap] = useState(true);
+  const [flatLayout, setFlatLayout] = useState<FlatLayout>("stacks");
+  const [allowOverlap, setAllowOverlap] = useState(false);
   const [overlapMm, setOverlapMm] = useState("15");
   const [lengthMm, setLengthMm] = useState("150");
   const [widthMm, setWidthMm] = useState("105");
@@ -111,12 +120,11 @@ export function BoxCalculator() {
   const [rotateMode, setRotateMode] = useState<RotateMode>("none");
   const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAlts, setShowAlts] = useState(false);
   const [rowMatchTolMm, setRowMatchTolMm] = useState("8");
-  const [allowVoidFill, setAllowVoidFill] = useState(true);
+  const [allowDivider, setAllowDivider] = useState(true);
   const [dividerMm, setDividerMm] = useState("0");
   const [maxDividerMm, setMaxDividerMm] = useState("30");
-  const [maxSideInsertMm, setMaxSideInsertMm] = useState("50");
-  const [maxHeightInsertMm, setMaxHeightInsertMm] = useState("80");
   const [inflateFromVolume, setInflateFromVolume] = useState(false);
   const [maxStackHeightMm, setMaxStackHeightMm] = useState("");
   const [roundStepMm, setRoundStepMm] = useState("5");
@@ -139,30 +147,27 @@ export function BoxCalculator() {
       packing,
       flatLayout: shape === "flat_stack" ? flatLayout : undefined,
       occupiedVolumeLiters:
-        shape === "flat_stack" && flatLayout === "loose_bulk"
+        shape === "flat_stack" && isBulkFlat(flatLayout)
           ? num(volumeLiters, 0) || null
           : null,
       allowOverlap:
-        shape === "flat_stack" && flatLayout === "loose_bulk"
-          ? allowOverlap
-          : false,
+        shape === "flat_stack" && isBulkFlat(flatLayout) ? allowOverlap : false,
       overlapMm:
-        shape === "flat_stack" && flatLayout === "loose_bulk" && allowOverlap
+        shape === "flat_stack" && isBulkFlat(flatLayout) && allowOverlap
           ? num(overlapMm, 0)
           : 0,
       rotateMode,
       selectedLayoutId,
       rowMatchTolMm: num(rowMatchTolMm, 8),
       roundStepMm: num(roundStepMm, 5),
-      allowVoidFill,
+      allowDivider: flatLayout === "stacks" ? allowDivider : false,
       dividerMm: num(dividerMm, 0),
       maxDividerMm: num(maxDividerMm, 30),
-      maxSideInsertMm: num(maxSideInsertMm, 50),
-      maxHeightInsertMm: num(maxHeightInsertMm, 80),
       inflateStackFromVolume: inflateFromVolume,
       maxStackHeightMm:
         maxStackHeightMm.trim() === "" ? null : num(maxStackHeightMm),
-      preferredGroupCounts: [2, 4],
+      preferredGroupCounts: [2, 4, 6, 8],
+      preferExactPallet: true,
     }),
     [
       shape,
@@ -181,11 +186,9 @@ export function BoxCalculator() {
       selectedLayoutId,
       rowMatchTolMm,
       roundStepMm,
-      allowVoidFill,
+      allowDivider,
       dividerMm,
       maxDividerMm,
-      maxSideInsertMm,
-      maxHeightInsertMm,
       inflateFromVolume,
       maxStackHeightMm,
     ],
@@ -210,7 +213,7 @@ export function BoxCalculator() {
             ? presetSquare()
             : presetRectBox();
     setShape(p.shape);
-    setFlatLayout(p.flatLayout ?? "neat_stack");
+    setFlatLayout(p.flatLayout ?? "stacks");
     setAllowOverlap(Boolean(p.allowOverlap));
     setOverlapMm(String(p.overlapMm ?? 15));
     setLengthMm(String(p.lengthMm));
@@ -224,11 +227,9 @@ export function BoxCalculator() {
     setWeightKg("");
     setPacking(p.packing);
     setRotateMode(p.rotateMode ?? "none");
-    setAllowVoidFill(Boolean(p.allowVoidFill));
+    setAllowDivider(Boolean(p.allowDivider ?? p.allowVoidFill));
     setDividerMm(String(p.dividerMm ?? 0));
     setMaxDividerMm(String(p.maxDividerMm ?? 30));
-    setMaxSideInsertMm(String(p.maxSideInsertMm ?? 50));
-    setMaxHeightInsertMm(String(p.maxHeightInsertMm ?? 80));
     setInflateFromVolume(Boolean(p.inflateStackFromVolume));
     setSelectedLayoutId(null);
     startTransition(() => setResult(recommendBoxes({ ...p, selectedLayoutId: null })));
@@ -323,7 +324,7 @@ export function BoxCalculator() {
                   if (opt.id === "flat_stack") {
                     setHeightMm("1.5");
                     setQuantity("100");
-                    setFlatLayout("loose_bulk");
+                    setFlatLayout("stacks");
                     if (!volumeLiters) setVolumeLiters("6.6");
                   }
                   if (opt.id === "rect") {
@@ -352,7 +353,7 @@ export function BoxCalculator() {
             <legend className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
               Укладка плоских
             </legend>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
               {FLAT_LAYOUT_OPTIONS.map((opt) => (
                 <button
                   key={opt.id}
@@ -377,7 +378,7 @@ export function BoxCalculator() {
                 </button>
               ))}
             </div>
-            {flatLayout === "loose_bulk" && (
+            {isBulkFlat(flatLayout) && (
               <div className="mt-3 space-y-3 rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] p-3">
                 <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--ink)]">
                   <Checkbox
@@ -387,7 +388,7 @@ export function BoxCalculator() {
                   <span>
                     <span className="font-semibold">Наложение</span>
                     <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                      Стык единиц чуть сжимает ряд (2×105 → ~190–195 вместо 210)
+                      Стык единиц чуть сжимает ряд (опционально)
                     </span>
                   </span>
                 </label>
@@ -409,10 +410,6 @@ export function BoxCalculator() {
                   step="0.1"
                   placeholder="например 6.6"
                 />
-                <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-                  Размер коробки считается по сетке L×W×стопки. Объём — проверка
-                  вспухания россыпи, не главный драйвер.
-                </p>
               </div>
             )}
           </fieldset>
@@ -543,23 +540,25 @@ export function BoxCalculator() {
           </div>
         </fieldset>
 
-        <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-sm text-[var(--ink)]">
-          <Checkbox
-            checked={allowVoidFill}
-            onCheckedChange={(v) => setAllowVoidFill(Boolean(v))}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="font-semibold">
-              Разрешить заполнить пустоту (вкладыш)
+        {flatLayout === "stacks" && shape === "flat_stack" && (
+          <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-sm text-[var(--ink)]">
+            <Checkbox
+              checked={allowDivider}
+              onCheckedChange={(v) => setAllowDivider(Boolean(v))}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-semibold">
+                Разрешить разделитель между стопками
+              </span>
+              <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                Модель может добавить картонный разделитель (в разумных
+                пределах). В 3D он рисуется отдельным цветом — не раздувает
+                габарит боковыми вкладышами.
+              </span>
             </span>
-            <span className="mt-0.5 block text-xs text-[var(--muted)]">
-              Модель сама подбирает разделитель между стопками и прокладки по
-              бокам / сверху-снизу в разумных пределах — чтобы выйти на
-              exact-паллет и техлимиты.
-            </span>
-          </span>
-        </label>
+          </label>
+        )}
 
         <div className="mt-4">
           <button
@@ -571,7 +570,7 @@ export function BoxCalculator() {
           </button>
           {showAdvanced && (
             <div className="mt-3 grid gap-3 rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] p-3 sm:grid-cols-2">
-              {allowVoidFill ? (
+              {allowDivider && flatLayout === "stacks" ? (
                 <>
                   <Field
                     label="Макс. разделитель, мм"
@@ -582,22 +581,6 @@ export function BoxCalculator() {
                     placeholder="30"
                   />
                   <Field
-                    label="Макс. вкладыш по бокам, мм"
-                    value={maxSideInsertMm}
-                    onChange={setMaxSideInsertMm}
-                    min={0}
-                    step="1"
-                    placeholder="50"
-                  />
-                  <Field
-                    label="Макс. вкладыш по высоте, мм"
-                    value={maxHeightInsertMm}
-                    onChange={setMaxHeightInsertMm}
-                    min={0}
-                    step="1"
-                    placeholder="80"
-                  />
-                  <Field
                     label="Подсказка разделителя, мм (опц.)"
                     value={dividerMm}
                     onChange={setDividerMm}
@@ -606,16 +589,16 @@ export function BoxCalculator() {
                     placeholder="0"
                   />
                 </>
-              ) : (
+              ) : flatLayout === "stacks" ? (
                 <Field
                   label="Разделитель между стопками, мм"
                   value={dividerMm}
                   onChange={setDividerMm}
                   min={0}
                   step="1"
-                  placeholder="10"
+                  placeholder="0"
                 />
-              )}
+              ) : null}
               <Field
                 label="Допуск brick-рядов, мм"
                 value={rowMatchTolMm}
@@ -648,8 +631,7 @@ export function BoxCalculator() {
                     Раздувать высоту стопки из объёма
                   </span>
                   <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                    Выкл.: толщина номинальная (как 1,5 мм), объём только для
-                    пустот. Вкл.: tEff из литров.
+                    Выкл.: толщина номинальная. Вкл.: tEff из литров.
                   </span>
                 </span>
               </label>
@@ -685,20 +667,17 @@ export function BoxCalculator() {
             quantity={Math.max(1, Math.floor(num(quantity, 1)))}
             nominalHeightMm={num(heightMm)}
             occupiedVolumeLiters={
-              shape === "flat_stack" && flatLayout === "loose_bulk"
+              shape === "flat_stack" && isBulkFlat(flatLayout)
                 ? num(volumeLiters, 0) || null
                 : null
             }
             overlapMm={
-              shape === "flat_stack" &&
-              flatLayout === "loose_bulk" &&
-              allowOverlap
+              shape === "flat_stack" && isBulkFlat(flatLayout) && allowOverlap
                 ? num(overlapMm, 0)
                 : 0
             }
             gapMm={
-              result.selectedLayout?.voidFill?.dividerMm ??
-              num(dividerMm, 0)
+              result.selectedLayout?.voidFill?.dividerMm ?? num(dividerMm, 0)
             }
             weightKg={weightKg.trim() === "" ? null : num(weightKg)}
             visible={visible}
@@ -707,6 +686,8 @@ export function BoxCalculator() {
             onlyCompliant={onlyCompliant}
             setOnlyCompliant={setOnlyCompliant}
             onSelectLayout={selectLayout}
+            showAlts={showAlts}
+            setShowAlts={setShowAlts}
           />
         )}
       </section>
@@ -816,6 +797,8 @@ function Results({
   onlyCompliant,
   setOnlyCompliant,
   onSelectLayout,
+  showAlts,
+  setShowAlts,
 }: {
   result: SizingResult;
   shape: ProductShape;
@@ -831,34 +814,65 @@ function Results({
   onlyCompliant: boolean;
   setOnlyCompliant: (v: boolean) => void;
   onSelectLayout: (id: string) => void;
+  showAlts: boolean;
+  setShowAlts: (v: boolean | ((b: boolean) => boolean)) => void;
 }) {
   const block = result.productBlock;
   const need = result.requiredInner;
   const selectedId = result.selectedLayout.id;
+  const alts = result.ranked.filter((l) => l.id !== selectedId).slice(0, 3);
+  const layout = result.selectedLayout;
 
   return (
     <div className="space-y-6">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--moss)]">
-          Расчёт
+          Результат
         </p>
         <h2 className="font-display mt-1 text-2xl font-semibold tracking-tight text-[var(--ink)] sm:text-3xl">
-          Нужен внутренний размер{" "}
+          Коробка{" "}
           <span className="font-mono whitespace-nowrap text-[var(--moss-deep)]">
             {need.lengthMm}×{need.widthMm}×{need.heightMm} мм
           </span>
         </h2>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          {result.selectedLayout.summary} · блок {fmtMm(block.lengthMm)} ×{" "}
-          {fmtMm(block.widthMm)} × {fmtMm(block.heightMm)}, зазор{" "}
-          {result.clearanceMm} мм на сторону · геометрия ~{volumeHint(result)} л
+          {layout.summary}
+          {layout.voidFill?.dividerMm
+            ? ` · разделитель ${layout.voidFill.dividerMm} мм`
+            : ""}{" "}
+          · блок {fmtMm(block.lengthMm)}×{fmtMm(block.widthMm)}×
+          {fmtMm(block.heightMm)} · ~{volumeHint(result)} л
           {result.occupiedVolumeLiters > 0 &&
-          Math.abs(result.occupiedVolumeLiters - result.selectedLayout.geomVolumeLiters) >
-            0.05
+          Math.abs(
+            result.occupiedVolumeLiters - result.selectedLayout.geomVolumeLiters,
+          ) > 0.05
             ? ` (заявлено ${result.occupiedVolumeLiters.toFixed(1)} л)`
             : ""}
           .
         </p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {layout.tech.ok ? (
+            <Badge className="bg-[var(--success)] text-white hover:bg-[var(--success)]">
+              Техдоступ
+            </Badge>
+          ) : (
+            <Badge className="bg-[var(--cta)] text-white hover:bg-[var(--cta-hover)]">
+              Самосбор
+            </Badge>
+          )}
+          {layout.pallet.exact ? (
+            <Badge className="bg-[var(--moss)] text-white hover:bg-[var(--moss)]">
+              Паллет {layout.pallet.alongLength}×{layout.pallet.alongWidth}
+            </Badge>
+          ) : layout.pallet.ok ? (
+            <Badge variant="secondary">
+              Паллет {Math.round(layout.pallet.coverage * 100)}%
+            </Badge>
+          ) : (
+            <Badge variant="secondary">Паллет слабо</Badge>
+          )}
+          <Badge variant="secondary">Под заказ</Badge>
+        </div>
       </div>
 
       <LayoutPreview
@@ -871,43 +885,34 @@ function Results({
         occupiedVolumeLiters={occupiedVolumeLiters}
       />
 
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-[var(--ink)]">
-          Эталон (1 стопка · лёжа на паллете)
-        </h3>
-        <LayoutCard
-          layout={result.etalon}
-          selected={selectedId === result.etalon.id}
-          onSelect={() => onSelectLayout(result.etalon.id)}
-          badge="Эталон · лёжа"
-          weightKg={weightKg}
-        />
-      </div>
-
-      {result.optimal.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-[var(--ink)]">
-            Оптимальные укладки
-            <span className="ml-2 font-normal text-[var(--muted)]">
-              паллет ≥90%
-            </span>
-          </h3>
-          {result.optimal.map((layout) => (
-            <LayoutCard
-              key={layout.id}
-              layout={layout}
-              selected={selectedId === layout.id}
-              onSelect={() => onSelectLayout(layout.id)}
-              badge="Оптимальная"
-              weightKg={weightKg}
-            />
-          ))}
+      {alts.length > 0 && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setShowAlts((v) => !v)}
+            className="cursor-pointer text-sm font-medium text-[var(--moss-deep)] underline-offset-2 hover:underline"
+          >
+            {showAlts
+              ? "Скрыть альтернативы"
+              : `Ещё варианты (${alts.length})`}
+          </button>
+          {showAlts &&
+            alts.map((alt) => (
+              <LayoutCard
+                key={alt.id}
+                layout={alt}
+                selected={selectedId === alt.id}
+                onSelect={() => onSelectLayout(alt.id)}
+                badge="Вариант"
+                weightKg={weightKg}
+              />
+            ))}
         </div>
       )}
 
       {result.notes.length > 0 && (
         <ul className="space-y-1 text-sm text-[var(--muted)]">
-          {result.notes.map((n) => (
+          {result.notes.slice(0, 4).map((n) => (
             <li key={n}>· {n}</li>
           ))}
         </ul>
@@ -915,31 +920,6 @@ function Results({
       <p className="rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--ink)]">
         {result.techHint}
       </p>
-      {result.markingHint && (
-        <p className="rounded-[var(--radius-md,10px)] border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--warning)_8%,white)] px-3 py-2 text-sm text-[#422006]">
-          {result.markingHint}
-        </p>
-      )}
-      {result.palletHint && (
-        <p className="rounded-[var(--radius-md,10px)] border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--ink)]">
-          {result.palletHint}
-        </p>
-      )}
-
-      <CustomBoxCard
-        rec={result.custom}
-        title={
-          result.custom.tech.ok
-            ? "Индивидуальный размер (от выбранной укладки)"
-            : "Индивидуальный · самосбор / штанцформа"
-        }
-      />
-      {result.customTech && (
-        <CustomBoxCard
-          rec={result.customTech}
-          title="Индивидуальный · под техлимиты слоттера"
-        />
-      )}
 
       <div className="flex flex-col gap-3 border-t border-[var(--line)] pt-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -973,18 +953,17 @@ function Results({
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-[var(--ink)]">
-          Типовые коробки из каталога
-          <span className="ml-2 font-normal text-[var(--muted)]">
-            от выбранной укладки
-          </span>
+          Близкие из каталога
         </h3>
         {visible.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">
-            В каталоге нет подходящего размера под выбранный фильтр. Возьмите
-            индивидуальный размер выше или ослабьте фильтр.
+            В каталоге нет близкого размера — используйте коробку выше под
+            заказ.
           </p>
         ) : (
-          visible.map((rec) => <CatalogCard key={rec.box.id} rec={rec} />)
+          visible.slice(0, 4).map((rec) => (
+            <CatalogCard key={rec.box.id} rec={rec} />
+          ))
         )}
       </div>
     </div>
@@ -1028,17 +1007,13 @@ function LayoutCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Badge
-              className={
-                badge === "Эталон"
-                  ? "bg-[var(--moss)] text-white hover:bg-[var(--moss)]"
-                  : "bg-[var(--cta)] text-white hover:bg-[var(--cta-hover)]"
-              }
+              className="bg-[var(--cta)] text-white hover:bg-[var(--cta-hover)]"
             >
               {badge}
             </Badge>
             {selected && (
               <Badge variant="secondary" className="border border-[var(--moss)]/30">
-                Выбрана · каталог от неё
+                Выбрана
               </Badge>
             )}
             {layout.rotatedFromCanon && (
@@ -1060,11 +1035,10 @@ function LayoutCard({
           </p>
           <p className="mt-1 text-sm text-[var(--muted)]">
             {layout.summary} · пустоты {Math.round(layout.voidRatio * 100)}%
-            {layout.rotatedFromCanon ? " · повёрнут от канона" : ""}
           </p>
-          {layout.voidFill && (
+          {layout.voidFill && layout.voidFill.dividerMm > 0 && (
             <p className="mt-1 text-xs text-[var(--moss-deep)]">
-              Вкладыш: {layout.voidFill.summary}
+              Разделитель {layout.voidFill.dividerMm} мм
             </p>
           )}
         </div>

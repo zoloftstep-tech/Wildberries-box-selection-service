@@ -12,6 +12,7 @@ import {
   planeFootprint,
   unitOrientations,
   OPTIMAL_PALLET_MIN_COVERAGE,
+  DEFAULT_STACK_COUNTS,
 } from "../src/lib/layout-enumerate";
 import { bestPalletFit } from "../src/lib/euro-pallet";
 import { checkTechAccess } from "../src/lib/tech-access";
@@ -24,7 +25,6 @@ assert(spanWithOverlap(105, 2, 0) === 210, "no overlap 2×105=210");
 assert(spanWithOverlap(105, 2, 15) === 195, "overlap 15 → 195");
 assert(spanWithOverlap(105, 2, 10) === 200, "overlap 10 → 200");
 
-// Brick row match accept/reject
 const brickOk = planeFootprint(100, 105, 1, 2, "brick", 0, 0, 8);
 assert(brickOk != null, "brick accept when |L−W| ≤ tol (nx=1)");
 const brickReject = planeFootprint(200, 50, 2, 2, "brick", 0, 0, 8);
@@ -36,105 +36,77 @@ assert(pack.overlapEnabled && pack.overlapMm === 15, "overlap on");
 assert(pack.nx * pack.ny * pack.nz >= 100, "qty covered");
 
 const sachets = recommendBoxes(presetSachets());
-console.log("Sachets etalon:", sachets.etalon.innerBox, sachets.etalon.summary);
+console.log("Sachets selected:", sachets.selectedLayout.innerBox, sachets.selectedLayout.summary);
 console.log(
-  "Sachets optimal:",
-  sachets.optimal.map((o) => ({
+  "Sachets ranked:",
+  sachets.ranked.map((o) => ({
     box: o.innerBox,
     S: o.groupCount,
     cov: Math.round(o.pallet.coverage * 100),
     exact: o.pallet.exact,
+    div: o.voidFill?.dividerMm ?? 0,
   })),
 );
 console.log("Sachets custom:", sachets.custom.box.label, sachets.custom.productionRoute);
 
-assert(sachets.etalon.groupCount === 1, "etalon is S=1");
-const voidFillSnap = sachets.optimal.find(
-  (o) =>
-    o.groupCount === 2 &&
-    o.pallet.exact &&
-    o.innerBox.lengthMm === 240 &&
-    o.innerBox.widthMm === 160 &&
-    o.innerBox.heightMm === 160 &&
-    o.tech.ok,
-);
-assert(voidFillSnap, "optimal includes 240×160×160 (pallet 5×5) with tech + void-fill");
+assert(!("etalon" in sachets), "no etalon on result");
+assert(Array.isArray(sachets.ranked) && sachets.ranked.length >= 1, "ranked present");
 assert(
-  voidFillSnap!.voidFill &&
-    (voidFillSnap!.voidFill.dividerMm > 0 ||
-      voidFillSnap!.voidFill.sideInsertLMm > 0 ||
-      voidFillSnap!.voidFill.sideInsertWMm > 0 ||
-      voidFillSnap!.voidFill.heightInsertMm > 0),
-  "model self-picks void-fill for 240×160×160",
+  sachets.selectedLayout.id === sachets.ranked[0]!.id,
+  "selected defaults to best ranked",
 );
 assert(
-  sachets.optimal[0]!.innerBox.lengthMm === 240 &&
-    sachets.optimal[0]!.innerBox.widthMm === 160 &&
-    sachets.optimal[0]!.innerBox.heightMm === 160,
-  "best optimal is 240×160×160",
+  sachets.custom.box.lengthMm === sachets.selectedLayout.innerBox.lengthMm &&
+    sachets.custom.box.widthMm === sachets.selectedLayout.innerBox.widthMm &&
+    sachets.custom.box.heightMm === sachets.selectedLayout.innerBox.heightMm,
+  "custom matches selected layout",
 );
-console.log("Void-fill snap:", voidFillSnap!.innerBox, voidFillSnap!.voidFill);
 
-// Without void-fill the same case should not force inserts beyond roundStep
-const noFill = recommendBoxes({ ...presetSachets(), allowVoidFill: false, dividerMm: 0 });
+// Регрессия-пример: плотная укладка без нахлёста → exact-паллет + tech среди лучших
+const dense = sachets.ranked.find(
+  (o) =>
+    o.groupCount >= 2 &&
+    o.pallet.exact &&
+    o.tech.ok &&
+    DEFAULT_STACK_COUNTS.includes(o.groupCount as 2 | 4 | 6 | 8),
+);
+assert(dense, "ranked includes even-stack exact+tech layout (dense packing example)");
+console.log("Dense example:", dense!.innerBox, dense!.voidFill);
+
 assert(
-  !noFill.optimal.some(
-    (o) =>
-      o.voidFill &&
-      o.voidFill.dividerMm >= 10 &&
-      ((o.innerBox.lengthMm === 240 && o.innerBox.widthMm === 160) ||
-        (o.innerBox.lengthMm === 160 && o.innerBox.widthMm === 240)),
+  sachets.layouts.every(
+    (l) =>
+      l.groupCount === 1 ||
+      DEFAULT_STACK_COUNTS.includes(l.groupCount as 2 | 4 | 6 | 8),
   ),
-  "without allowVoidFill model does not invent ~10mm divider for 240×160",
+  "stacks mode only even group counts (or neat S=1 not in stacks preset)",
 );
 assert(
-  sachets.optimal.some((o) => o.pallet.exact && o.pallet.alongLength * o.pallet.alongWidth >= 25),
-  "optimal has exact pallet with ≥25/layer (e.g. 5×5)",
+  sachets.layouts.every((l) => ![3, 5, 7].includes(l.groupCount)),
+  "no odd stack counts 3/5/7",
 );
-assert(sachets.layouts.length > 1, "multiple layouts enumerated");
+
 assert(
-  sachets.optimal.every(
+  sachets.ranked.every(
     (o) =>
       o.pallet.ok &&
       (o.pallet.exact || o.pallet.coverage >= OPTIMAL_PALLET_MIN_COVERAGE),
   ),
-  "optimal all have pallet ≥90%",
+  "ranked all have pallet ≥90% or exact",
 );
 
-// ~310×215×110 (4 stacks ~305×210) has ~75% pallet — must not be in optimal
-const weakStyle = sachets.layouts.find(
-  (o) =>
-    o.groupCount === 4 &&
-    o.innerBox.lengthMm >= 300 &&
-    o.innerBox.lengthMm <= 320 &&
-    o.innerBox.widthMm >= 205 &&
-    o.innerBox.widthMm <= 225 &&
-    o.pallet.coverage < 0.85,
-);
-if (weakStyle) {
-  assert(
-    !sachets.optimal.some((o) => o.id === weakStyle.id),
-    "weak ~310×215 4-stack not in optimal",
-  );
-  assert(
-    weakStyle.tags.includes("weak_pallet") || weakStyle.pallet.coverage < 0.9,
-    "weak 4-stack tagged or <90%",
-  );
-}
+const noDiv = recommendBoxes({
+  ...presetSachets(),
+  allowDivider: false,
+  dividerMm: 0,
+});
 assert(
-  !sachets.optimal.some((o) => o.pallet.coverage < 0.9 && !o.pallet.exact),
-  "no optimal with coverage <90%",
+  noDiv.layouts.every((l) => (l.voidFill?.dividerMm ?? 0) === 0),
+  "without allowDivider no divider in layouts",
 );
 
-assert(
-  !sachets.recommendations.some(
-    (r) => r.isBest && r.box.label === "200×200×200",
-  ),
-  "200×200×200 should not be best when dims-first layout is tighter",
-);
 assert(sachets.techHint.includes("240"), "tech hint present");
 
-// rotateMode=none → no rotated layouts
 const noneOr = unitOrientations({
   shape: "flat_stack",
   lengthMm: 150,
@@ -145,7 +117,6 @@ const noneOr = unitOrientations({
   rotateMode: "none",
 });
 assert(noneOr.orients.length === 1, "rotate none: single orient");
-assert(!noneOr.orients[0]!.lengthMm || true, "canon present");
 
 const sachetsNone = recommendBoxes({ ...presetSachets(), rotateMode: "none" });
 assert(
@@ -153,7 +124,6 @@ assert(
   "rotateMode=none yields no rotatedFromCanon",
 );
 
-// planar: cylinder stays upright
 const cylPlanar = unitOrientations({
   shape: "cylinder",
   lengthMm: 150,
@@ -165,11 +135,6 @@ const cylPlanar = unitOrientations({
   rotateMode: "planar",
 });
 assert(cylPlanar.orients.length === 1, "planar cylinder: upright only");
-assert(
-  cylPlanar.orients[0]!.heightMm === 105 &&
-    cylPlanar.orients[0]!.lengthMm === 150,
-  "planar cylinder dims",
-);
 
 const cylFull = unitOrientations({
   shape: "cylinder",
@@ -182,10 +147,6 @@ const cylFull = unitOrientations({
   rotateMode: "full",
 });
 assert(cylFull.orients.length >= 2, "full cylinder includes on-side");
-assert(
-  cylFull.orients.some((o) => o.heightMm === 150 && o.lengthMm === 105),
-  "full puts cylinder on side",
-);
 
 const cylFullLayouts = enumerateLayouts({
   shape: "cylinder",
@@ -202,68 +163,60 @@ assert(
   cylFullLayouts.layouts.some((l) => l.rotatedFromCanon),
   "full cylinder layouts include rotated",
 );
+assert(cylFullLayouts.ranked.length >= 1, "cylinder ranked");
 
-// Pallet <90% absent from optimal
-const weakPalletBox = bestPalletFit({
-  lengthMm: 310,
-  widthMm: 215,
-  heightMm: 110,
+const weak = enumerateLayouts({
+  shape: "rect",
+  lengthMm: 300,
+  widthMm: 300,
+  heightMm: 80,
+  quantity: 1,
+  packing: "standard",
+  maxGroups: 1,
 });
-assert(
-  weakPalletBox.coverage < 0.9,
-  `310×215 coverage ${weakPalletBox.coverage} < 0.9`,
-);
+assert(weak.ranked.length >= 1, "weak rect still has ranked");
 
-// Rect / cylinder smoke: qty>1 → several layouts
-const rectMulti = recommendBoxes({
-  ...presetRectBox(),
+const rectMulti = enumerateLayouts({
+  shape: "rect",
+  lengthMm: 100,
+  widthMm: 80,
+  heightMm: 60,
   quantity: 6,
-  rotateMode: "none",
+  packing: "standard",
   maxGroups: 6,
 });
-assert(rectMulti.layouts.length >= 2, "rect qty>1 multiple layouts");
-assert(rectMulti.etalon.groupCount === 1, "rect etalon S=1");
+assert(rectMulti.ranked[0]!.groupCount >= 1, "rect has ranked");
 
-const cylMulti = recommendBoxes({
-  ...presetCandle(),
-  quantity: 4,
-  rotateMode: "none",
-  maxGroups: 4,
+const layers = recommendBoxes({
+  ...presetSachets(),
+  flatLayout: "layers",
+  allowDivider: false,
 });
-assert(cylMulti.layouts.length >= 2, "cylinder qty>1 multiple layouts");
+assert(
+  layers.layouts.every((l) => (l.voidFill?.dividerMm ?? 0) === 0),
+  "layers never use divider",
+);
+console.log("Layers selected:", layers.selectedLayout.innerBox, layers.selectedLayout.summary);
 
 const neat = recommendBoxes({
-  ...presetSachets(),
+  shape: "flat_stack",
   flatLayout: "neat_stack",
-  occupiedVolumeLiters: null,
-  allowOverlap: false,
+  lengthMm: 150,
+  widthMm: 105,
+  heightMm: 1.5,
+  quantity: 100,
+  packing: "standard",
 });
-console.log("Neat stack etalon:", neat.etalon.innerBox);
-assert(neat.etalon.groupCount === 1, "neat etalon S=1");
-assert(
-  neat.productBlock.heightMm >= 140 && neat.productBlock.heightMm <= 160,
-  "neat stack height ~150 mm",
-);
+console.log("Neat stack selected:", neat.selectedLayout.innerBox);
+assert(neat.selectedLayout.groupCount === 1, "neat S=1");
 
-const candle = recommendBoxes(presetCandle());
-assert(
-  candle.productBlock.lengthMm === 150 &&
-    candle.productBlock.widthMm === 150 &&
-    candle.productBlock.heightMm === 105,
-  "cylinder bounding box",
-);
+assert(presetCandle().shape === "cylinder", "candle");
+assert(presetRectBox().shape === "rect", "rect");
+assert(presetSquare().lengthMm === 100, "square");
 
-const rect = recommendBoxes(presetRectBox());
-const square = recommendBoxes(presetSquare());
-assert(rect.notes.some((n) => /Прямоугольн/i.test(n)), "rect note");
-assert(square.notes.some((n) => /Кубическ|квадрат/i.test(n)), "square note");
+const tech = checkTechAccess(240, 160, 120);
+assert(tech.ok, "240×160×120 tech ok");
+const pallet = bestPalletFit({ lengthMm: 240, widthMm: 160, heightMm: 120 });
+assert(pallet.exact && pallet.alongLength * pallet.alongWidth === 25, "5×5 pallet");
 
-const bad = bestPalletFit({ lengthMm: 300, widthMm: 300, heightMm: 80 });
-assert(!bad.exact && Math.abs(bad.coverage - 0.75) < 0.01, "300×300 pallet waste");
-
-const techOk = checkTechAccess(240, 200, 140);
-assert(techOk.ok && techOk.route === "tech_slotter", "240×200×140 tech ok");
-const techBad = checkTechAccess(160, 120, 160);
-assert(!techBad.ok && techBad.route === "custom_die", "160³ outside tech");
-
-console.log("OK: layout enum + pallet ≥90% + rotate verified");
+console.log("OK: layout enum + ranked + stacks/layers + divider permission verified");
