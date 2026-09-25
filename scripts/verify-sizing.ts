@@ -6,6 +6,7 @@ import {
   presetSquare,
   spanWithOverlap,
   bestLooseFlatPack,
+  geomVoidRatio,
 } from "../src/lib/sizing";
 import {
   enumerateLayouts,
@@ -121,6 +122,38 @@ assert(
   `150×105×3 → 240×160×160 (got ${thick.selectedLayout.innerBox.lengthMm}×${thick.selectedLayout.innerBox.widthMm}×${thick.selectedLayout.innerBox.heightMm})`,
 );
 console.log("Thick 3mm:", thick.selectedLayout.innerBox);
+
+// Каталог 400×300×200 для 150×105×3: огромная пустота (~78%), не 16% от коробки под заказ
+{
+  const cat = thick.recommendations.find(
+    (r) =>
+      r.box.lengthMm === 400 &&
+      r.box.widthMm === 300 &&
+      r.box.heightMm === 200,
+  );
+  assert(cat, "catalog has 400×300×200");
+  const box = {
+    lengthMm: 400,
+    widthMm: 300,
+    heightMm: 200,
+  };
+  const voidCat = geomVoidRatio(box, thick.selectedLayout.productBlock);
+  assert(
+    voidCat > 0.6,
+    `catalog 400×300×200 void must be huge (got ${Math.round(voidCat * 100)}%, not custom-box void)`,
+  );
+  assert(
+    Math.abs(voidCat - thick.selectedLayout.voidRatio) > 0.3,
+    "catalog void ≠ custom selected void",
+  );
+  console.log(
+    "Catalog 400×300×200 void%",
+    Math.round(voidCat * 100),
+    "vs custom",
+    Math.round(thick.selectedLayout.voidRatio * 100),
+  );
+}
+
 assert(
   sachets.layouts.every((l) => ![3, 5, 7].includes(l.groupCount)),
   "no odd stack counts 3/5/7",

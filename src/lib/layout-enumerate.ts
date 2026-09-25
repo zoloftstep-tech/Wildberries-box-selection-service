@@ -185,6 +185,17 @@ function addClearanceDims(d: Dims, clearanceMm: number): Dims {
   };
 }
 
+/** Доля пустого объёма: 1 − V(контент) / V(коробка). Совпадает с тем, что видно в 3D. */
+export function geomVoidRatio(
+  box: Dims,
+  content: Dims,
+): number {
+  const boxVol = box.lengthMm * box.widthMm * box.heightMm;
+  const contentVol = content.lengthMm * content.widthMm * content.heightMm;
+  if (boxVol <= 0) return 1;
+  return Math.max(0, Math.min(1, (boxVol - contentVol) / boxVol));
+}
+
 function sameOrient(a: UnitOrient, b: UnitOrient, eps = 0.05): boolean {
   return (
     Math.abs(a.lengthMm - b.lengthMm) < eps &&
@@ -531,10 +542,8 @@ function buildCandidate(args: {
     innerBox.heightMm,
   );
   const boxVol = volumeLiters(innerBox);
-  // Пустота = геометрия блока vs коробка (не заявленные литры россыпи)
-  const geomProductVol = volumeLiters(productBlock);
-  const voidRatio =
-    boxVol > 0 ? Math.max(0, (boxVol - geomProductVol) / boxVol) : 1;
+  // Пустота = геометрия блока укладки vs коробка (то, что видно в 3D)
+  const voidRatio = geomVoidRatio(innerBox, productBlock);
   const rotatedFromCanon = !sameOrient(unitOrient, canon);
   const preferred = Boolean(
     preferredGroupCounts?.includes(groupCount) && groupCount > 1,

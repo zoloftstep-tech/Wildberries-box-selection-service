@@ -10,6 +10,7 @@ import {
 } from "./euro-pallet";
 import {
   enumerateLayouts,
+  geomVoidRatio,
   spanWithOverlap as spanWithOverlapLayout,
   type LayoutCandidate,
   type RotateMode,
@@ -33,6 +34,7 @@ export type FlatLayout = "neat_stack" | "stacks" | "layers" | "loose_bulk";
 export type PackingMode = "tight" | "standard" | "bubble" | "fragile";
 
 export type { LayoutCandidate, RotateMode };
+export { geomVoidRatio };
 
 export interface ProductInput {
   shape: ProductShape;

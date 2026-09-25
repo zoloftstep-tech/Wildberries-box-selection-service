@@ -12,6 +12,7 @@ import {
   presetSachets,
   presetRectBox,
   presetSquare,
+  geomVoidRatio,
   type FlatLayout,
   type LayoutCandidate,
   type PackingMode,
@@ -853,6 +854,9 @@ function Results({
     : result.selectedLayout;
   const need = previewLayout.innerBox;
   const layout = previewLayout;
+  // Пустота всегда от показанной коробки и блока укладки — как в 3D
+  const voidRatio = geomVoidRatio(need, block);
+  const voidPct = Math.round(voidRatio * 100);
 
   return (
     <div className="space-y-6">
@@ -861,11 +865,14 @@ function Results({
           Результат
         </p>
         <h2 className="font-display mt-1 text-2xl font-semibold tracking-tight text-[var(--ink)] sm:text-3xl">
-          Коробка{" "}
+          Внутр.{" "}
           <span className="font-mono whitespace-nowrap text-[var(--moss-deep)]">
             {need.lengthMm}×{need.widthMm}×{need.heightMm} мм
           </span>
         </h2>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Внутренний размер коробки (не внешний габарит)
+        </p>
         <p className="mt-2 text-sm text-[var(--muted)]">
           {catalogRec
             ? `Каталог ${catalogRec.box.label} · укладка как у выбранного варианта`
@@ -874,7 +881,8 @@ function Results({
             ? ` · разделитель ${layout.voidFill.dividerMm} мм`
             : ""}{" "}
           · блок {fmtMm(block.lengthMm)}×{fmtMm(block.widthMm)}×
-          {fmtMm(block.heightMm)} · коробка {volumeLitersBox(need).toFixed(2)} л
+          {fmtMm(block.heightMm)} · {volumeLitersBox(need).toFixed(2)} л ·
+          пустоты {voidPct}%
           {occupiedVolumeLiters != null && occupiedVolumeLiters > 0
             ? ` · россыпь (справка) ${occupiedVolumeLiters.toFixed(1)} л`
             : ""}
@@ -903,12 +911,12 @@ function Results({
           )}
           <Badge
             className={
-              layout.voidRatio > 0.35
+              voidRatio > 0.35
                 ? "bg-[color-mix(in_srgb,var(--warning)_20%,white)] text-[#92400e] hover:bg-[color-mix(in_srgb,var(--warning)_20%,white)]"
-                : "bg-[var(--surface-muted)] text-[var(--ink)]"
+                : "border border-[var(--line-strong)] bg-[var(--panel)] text-[var(--ink)]"
             }
           >
-            Пустоты {Math.round(layout.voidRatio * 100)}%
+            Пустоты {voidPct}%
           </Badge>
           <Badge variant="secondary">
             {catalogRec ? "Каталог" : "Под заказ"}
@@ -1006,6 +1014,7 @@ function Results({
             <CatalogCard
               key={rec.box.id}
               rec={rec}
+              productBlock={block}
               selected={catalogPreviewId === rec.box.id}
               onSelect={() => onSelectCatalog(rec.box.id)}
             />
@@ -1023,10 +1032,12 @@ function layoutWithCatalogBox(
 ): LayoutCandidate {
   const L = Math.max(box.lengthMm, box.widthMm);
   const W = Math.min(box.lengthMm, box.widthMm);
+  const innerBox = { lengthMm: L, widthMm: W, heightMm: box.heightMm };
   return {
     ...base,
     id: `catalog-preview-${box.id}`,
-    innerBox: { lengthMm: L, widthMm: W, heightMm: box.heightMm },
+    innerBox,
+    voidRatio: geomVoidRatio(innerBox, base.productBlock),
   };
 }
 
@@ -1090,18 +1101,13 @@ function LayoutCard({
             )}
           </div>
           <p className="font-display mt-2 font-mono text-xl font-semibold text-[var(--ink)]">
-            {layout.innerBox.lengthMm}×{layout.innerBox.widthMm}×
+            Внутр. {layout.innerBox.lengthMm}×{layout.innerBox.widthMm}×
             {layout.innerBox.heightMm} мм
           </p>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            {layout.summary} · пустоты {Math.round(layout.voidRatio * 100)}% ·{" "}
-            {(
-              (layout.innerBox.lengthMm *
-                layout.innerBox.widthMm *
-                layout.innerBox.heightMm) /
-              1_000_000
-            ).toFixed(2)}{" "}
-            л
+            {layout.summary} · пустоты{" "}
+            {Math.round(geomVoidRatio(layout.innerBox, layout.productBlock) * 100)}
+            % · {volumeLitersBox(layout.innerBox).toFixed(2)} л
           </p>
           {layout.voidFill && layout.voidFill.dividerMm > 0 && (
             <p className="mt-1 text-xs text-[var(--moss-deep)]">
@@ -1404,13 +1410,21 @@ function CustomBoxCard({
 
 function CatalogCard({
   rec,
+  productBlock,
   selected,
   onSelect,
 }: {
   rec: BoxRecommendation;
+  productBlock: { lengthMm: number; widthMm: number; heightMm: number };
   selected: boolean;
   onSelect: () => void;
 }) {
+  const box = {
+    lengthMm: Math.max(rec.box.lengthMm, rec.box.widthMm),
+    widthMm: Math.min(rec.box.lengthMm, rec.box.widthMm),
+    heightMm: rec.box.heightMm,
+  };
+  const voidPct = Math.round(geomVoidRatio(box, productBlock) * 100);
   return (
     <button
       type="button"
@@ -1428,7 +1442,7 @@ function CatalogCard({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-display font-mono text-xl font-semibold text-[var(--ink)]">
-              {rec.box.label} мм
+              Внутр. {rec.box.label} мм
             </p>
             <ProductionBadge rec={rec} />
             {selected && (
@@ -1464,12 +1478,7 @@ function CatalogCard({
           <p className="mt-1 text-sm text-[var(--muted)]">
             Ориентация {rec.fit.orientation.lengthMm}×
             {rec.fit.orientation.widthMm}×{rec.fit.orientation.heightMm} ·
-            пустоты {Math.round(rec.fit.unusedVolumeRatio * 100)}% ·{" "}
-            {(
-              (rec.box.lengthMm * rec.box.widthMm * rec.box.heightMm) /
-              1_000_000
-            ).toFixed(2)}{" "}
-            л
+            пустоты {voidPct}% · {volumeLitersBox(box).toFixed(2)} л
           </p>
         </div>
         <ComplianceBadges rec={rec} />

@@ -4,7 +4,7 @@ import { Canvas } from "@react-three/fiber";
 import { Edges, OrbitControls } from "@react-three/drei";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { spanWithOverlap } from "@/lib/layout-enumerate";
+import { spanWithOverlap, geomVoidRatio } from "@/lib/layout-enumerate";
 import type { LayoutCandidate } from "@/lib/layout-enumerate";
 import type { ProductShape } from "@/lib/sizing";
 
@@ -697,7 +697,10 @@ export function LayoutPreview({
           Превью укладки
         </p>
         <p className="text-[11px] text-[var(--muted)]">
-          {unitCount} шт · {layout.summary}
+          {unitCount} шт · внутр. {Math.round(box.lengthMm)}×
+          {Math.round(box.widthMm)}×{Math.round(box.heightMm)} мм · пустоты{" "}
+          {Math.round(geomVoidRatio(box, layout.productBlock) * 100)}% ·{" "}
+          {layout.summary}
         </p>
       </div>
       <div className="h-[240px] w-full sm:h-[280px]">
