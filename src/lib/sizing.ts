@@ -814,27 +814,6 @@ export function recommendBoxes(input: ProductInput): SizingResult {
   const firstTech = top.find((r) => r.tech.ok);
   if (firstTech) firstTech.isBestTech = true;
 
-  if (
-    input.shape === "flat_stack" &&
-    (input.flatLayout === "loose_bulk" ||
-      input.flatLayout === "stacks" ||
-      input.flatLayout === "layers") &&
-    input.occupiedVolumeLiters != null &&
-    input.occupiedVolumeLiters > 0
-  ) {
-    for (const rec of [custom, customTech, ...top].filter(
-      Boolean,
-    ) as BoxRecommendation[]) {
-      const boxVol =
-        (rec.box.lengthMm * rec.box.widthMm * rec.box.heightMm) / 1_000_000;
-      if (boxVol + 0.05 < input.occupiedVolumeLiters) {
-        rec.warnings.push(
-          `Объём коробки ${boxVol.toFixed(1)} л < заявленной россыпи ${input.occupiedVolumeLiters.toFixed(1)} л — может быть тесно при вспухании.`,
-        );
-      }
-    }
-  }
-
   const faceA = Math.min(
     productBlock.lengthMm,
     productBlock.widthMm,
@@ -892,7 +871,7 @@ export function presetSachets(): ProductInput {
     widthMm: 105,
     heightMm: 1.5,
     quantity: 100,
-    occupiedVolumeLiters: 6.6,
+    occupiedVolumeLiters: 6.6, // только справка в UI
     allowOverlap: false,
     overlapMm: 0,
     rotateMode: "none",

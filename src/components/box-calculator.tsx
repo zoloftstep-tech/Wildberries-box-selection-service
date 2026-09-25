@@ -121,6 +121,7 @@ export function BoxCalculator() {
   const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showAlts, setShowAlts] = useState(false);
+  const [catalogPreviewId, setCatalogPreviewId] = useState<string | null>(null);
   const [rowMatchTolMm, setRowMatchTolMm] = useState("8");
   const [allowDivider, setAllowDivider] = useState(true);
   const [dividerMm, setDividerMm] = useState("0");
@@ -232,6 +233,7 @@ export function BoxCalculator() {
     setMaxDividerMm(String(p.maxDividerMm ?? 30));
     setInflateFromVolume(Boolean(p.inflateStackFromVolume));
     setSelectedLayoutId(null);
+    setCatalogPreviewId(null);
     startTransition(() => setResult(recommendBoxes({ ...p, selectedLayoutId: null })));
   }
 
@@ -240,7 +242,12 @@ export function BoxCalculator() {
   }
 
   function selectLayout(id: string) {
+    setCatalogPreviewId(null);
     setSelectedLayoutId(id);
+  }
+
+  function selectCatalog(boxId: string) {
+    setCatalogPreviewId(boxId);
   }
 
   const visible = useMemo(() => {
@@ -403,10 +410,11 @@ export function BoxCalculator() {
                   />
                 )}
                 <Field
-                  label="Занимаемый объём, л (вторично)"
+                  label="Объём россыпи, л (только справка)"
+                  hint="Не влияет на подбор размера — показывается рядом с вариантами"
                   value={volumeLiters}
                   onChange={setVolumeLiters}
-                  min={0.01}
+                  min={0}
                   step="0.1"
                   placeholder="например 6.6"
                 />
@@ -686,6 +694,8 @@ export function BoxCalculator() {
             onlyCompliant={onlyCompliant}
             setOnlyCompliant={setOnlyCompliant}
             onSelectLayout={selectLayout}
+            catalogPreviewId={catalogPreviewId}
+            onSelectCatalog={selectCatalog}
             showAlts={showAlts}
             setShowAlts={setShowAlts}
           />
@@ -701,6 +711,14 @@ function volumeHint(result: SizingResult): string {
     result.flatPack?.geomVolumeLiters ??
     result.occupiedVolumeLiters;
   return g.toFixed(2);
+}
+
+function volumeLitersBox(box: {
+  lengthMm: number;
+  widthMm: number;
+  heightMm: number;
+}): number {
+  return (box.lengthMm * box.widthMm * box.heightMm) / 1_000_000;
 }
 
 function Field({
@@ -797,6 +815,8 @@ function Results({
   onlyCompliant,
   setOnlyCompliant,
   onSelectLayout,
+  catalogPreviewId,
+  onSelectCatalog,
   showAlts,
   setShowAlts,
 }: {
@@ -814,14 +834,25 @@ function Results({
   onlyCompliant: boolean;
   setOnlyCompliant: (v: boolean) => void;
   onSelectLayout: (id: string) => void;
+  catalogPreviewId: string | null;
+  onSelectCatalog: (boxId: string) => void;
   showAlts: boolean;
   setShowAlts: (v: boolean | ((b: boolean) => boolean)) => void;
 }) {
   const block = result.productBlock;
-  const need = result.requiredInner;
   const selectedId = result.selectedLayout.id;
   const alts = result.ranked.filter((l) => l.id !== selectedId).slice(0, 3);
-  const layout = result.selectedLayout;
+  const catalogRec =
+    catalogPreviewId != null
+      ? visible.find((r) => r.box.id === catalogPreviewId) ??
+        result.recommendations.find((r) => r.box.id === catalogPreviewId) ??
+        null
+      : null;
+  const previewLayout = catalogRec
+    ? layoutWithCatalogBox(result.selectedLayout, catalogRec.box)
+    : result.selectedLayout;
+  const need = previewLayout.innerBox;
+  const layout = previewLayout;
 
   return (
     <div className="space-y-6">
@@ -836,17 +867,16 @@ function Results({
           </span>
         </h2>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          {layout.summary}
-          {layout.voidFill?.dividerMm
+          {catalogRec
+            ? `Каталог ${catalogRec.box.label} · укладка как у выбранного варианта`
+            : layout.summary}
+          {!catalogRec && layout.voidFill?.dividerMm
             ? ` · разделитель ${layout.voidFill.dividerMm} мм`
             : ""}{" "}
           · блок {fmtMm(block.lengthMm)}×{fmtMm(block.widthMm)}×
-          {fmtMm(block.heightMm)} · ~{volumeHint(result)} л
-          {result.occupiedVolumeLiters > 0 &&
-          Math.abs(
-            result.occupiedVolumeLiters - result.selectedLayout.geomVolumeLiters,
-          ) > 0.05
-            ? ` (заявлено ${result.occupiedVolumeLiters.toFixed(1)} л)`
+          {fmtMm(block.heightMm)} · коробка {volumeLitersBox(need).toFixed(2)} л
+          {occupiedVolumeLiters != null && occupiedVolumeLiters > 0
+            ? ` · россыпь (справка) ${occupiedVolumeLiters.toFixed(1)} л`
             : ""}
           .
         </p>
@@ -871,12 +901,23 @@ function Results({
           ) : (
             <Badge variant="secondary">Паллет слабо</Badge>
           )}
-          <Badge variant="secondary">Под заказ</Badge>
+          <Badge
+            className={
+              layout.voidRatio > 0.35
+                ? "bg-[color-mix(in_srgb,var(--warning)_20%,white)] text-[#92400e] hover:bg-[color-mix(in_srgb,var(--warning)_20%,white)]"
+                : "bg-[var(--surface-muted)] text-[var(--ink)]"
+            }
+          >
+            Пустоты {Math.round(layout.voidRatio * 100)}%
+          </Badge>
+          <Badge variant="secondary">
+            {catalogRec ? "Каталог" : "Под заказ"}
+          </Badge>
         </div>
       </div>
 
       <LayoutPreview
-        layout={result.selectedLayout}
+        layout={previewLayout}
         shape={shape}
         quantity={quantity}
         overlapMm={overlapMm}
@@ -962,12 +1003,31 @@ function Results({
           </p>
         ) : (
           visible.slice(0, 4).map((rec) => (
-            <CatalogCard key={rec.box.id} rec={rec} />
+            <CatalogCard
+              key={rec.box.id}
+              rec={rec}
+              selected={catalogPreviewId === rec.box.id}
+              onSelect={() => onSelectCatalog(rec.box.id)}
+            />
           ))
         )}
       </div>
     </div>
   );
+}
+
+/** Превью: та же укладка товара, но оболочка = типовая коробка из каталога. */
+function layoutWithCatalogBox(
+  base: LayoutCandidate,
+  box: { id: string; lengthMm: number; widthMm: number; heightMm: number },
+): LayoutCandidate {
+  const L = Math.max(box.lengthMm, box.widthMm);
+  const W = Math.min(box.lengthMm, box.widthMm);
+  return {
+    ...base,
+    id: `catalog-preview-${box.id}`,
+    innerBox: { lengthMm: L, widthMm: W, heightMm: box.heightMm },
+  };
 }
 
 function LayoutCard({
@@ -1034,7 +1094,14 @@ function LayoutCard({
             {layout.innerBox.heightMm} мм
           </p>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            {layout.summary} · пустоты {Math.round(layout.voidRatio * 100)}%
+            {layout.summary} · пустоты {Math.round(layout.voidRatio * 100)}% ·{" "}
+            {(
+              (layout.innerBox.lengthMm *
+                layout.innerBox.widthMm *
+                layout.innerBox.heightMm) /
+              1_000_000
+            ).toFixed(2)}{" "}
+            л
           </p>
           {layout.voidFill && layout.voidFill.dividerMm > 0 && (
             <p className="mt-1 text-xs text-[var(--moss-deep)]">
@@ -1335,14 +1402,26 @@ function CustomBoxCard({
   );
 }
 
-function CatalogCard({ rec }: { rec: BoxRecommendation }) {
+function CatalogCard({
+  rec,
+  selected,
+  onSelect,
+}: {
+  rec: BoxRecommendation;
+  selected: boolean;
+  onSelect: () => void;
+}) {
   return (
-    <article
+    <button
+      type="button"
+      onClick={onSelect}
       className={cn(
-        "rounded-[var(--radius-lg,14px)] border bg-[var(--panel)] p-4 transition-shadow duration-150",
-        rec.isBest
-          ? "border-[var(--moss)] shadow-[var(--shadow-md)]"
-          : "border-[var(--line)]",
+        "w-full cursor-pointer rounded-[var(--radius-lg,14px)] border bg-[var(--panel)] p-4 text-left transition-shadow duration-150",
+        selected
+          ? "border-[var(--moss)] bg-[var(--moss-soft)] shadow-[var(--shadow-md)]"
+          : rec.isBest
+            ? "border-[var(--moss)] shadow-[var(--shadow-md)] hover:border-[var(--line-strong)]"
+            : "border-[var(--line)] hover:border-[var(--line-strong)]",
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1352,6 +1431,14 @@ function CatalogCard({ rec }: { rec: BoxRecommendation }) {
               {rec.box.label} мм
             </p>
             <ProductionBadge rec={rec} />
+            {selected && (
+              <Badge
+                variant="secondary"
+                className="border border-[var(--moss)]/30"
+              >
+                В 3D
+              </Badge>
+            )}
             {rec.isBest && (
               <Badge className="bg-[var(--moss)] text-white hover:bg-[var(--moss)]">
                 Лучший из каталога
@@ -1377,7 +1464,12 @@ function CatalogCard({ rec }: { rec: BoxRecommendation }) {
           <p className="mt-1 text-sm text-[var(--muted)]">
             Ориентация {rec.fit.orientation.lengthMm}×
             {rec.fit.orientation.widthMm}×{rec.fit.orientation.heightMm} ·
-            пустоты {Math.round(rec.fit.unusedVolumeRatio * 100)}%
+            пустоты {Math.round(rec.fit.unusedVolumeRatio * 100)}% ·{" "}
+            {(
+              (rec.box.lengthMm * rec.box.widthMm * rec.box.heightMm) /
+              1_000_000
+            ).toFixed(2)}{" "}
+            л
           </p>
         </div>
         <ComplianceBadges rec={rec} />
@@ -1389,7 +1481,7 @@ function CatalogCard({ rec }: { rec: BoxRecommendation }) {
           {w}
         </p>
       ))}
-    </article>
+    </button>
   );
 }
 

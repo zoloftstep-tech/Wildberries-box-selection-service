@@ -42,8 +42,10 @@ console.log(
   sachets.ranked.map((o) => ({
     box: o.innerBox,
     S: o.groupCount,
+    void: Math.round(o.voidRatio * 100),
     cov: Math.round(o.pallet.coverage * 100),
     exact: o.pallet.exact,
+    tech: o.tech.ok,
     div: o.voidFill?.dividerMm ?? 0,
   })),
 );
@@ -62,25 +64,63 @@ assert(
   "custom matches selected layout",
 );
 
-// Регрессия-пример: плотная укладка без нахлёста → exact-паллет + tech среди лучших
-const dense = sachets.ranked.find(
-  (o) =>
-    o.groupCount >= 2 &&
-    o.pallet.exact &&
-    o.tech.ok &&
-    DEFAULT_STACK_COUNTS.includes(o.groupCount as 2 | 4 | 6 | 8),
+// Плотная укладка: exact-паллет, без раздува H ради техлимитов, пустота считается по геометрии
+const best = sachets.selectedLayout;
+assert(best.groupCount === 2, "best is 2 stacks");
+assert(best.pallet.exact, "best has exact pallet");
+assert(
+  best.voidRatio > 0.05 && best.voidRatio < 0.35,
+  `geom void shown and moderate (got ${Math.round(best.voidRatio * 100)}%)`,
 );
-assert(dense, "ranked includes even-stack exact+tech layout (dense packing example)");
-console.log("Dense example:", dense!.innerBox, dense!.voidFill);
+assert(
+  best.innerBox.heightMm <= 100,
+  `no tech-inflate to 120 when stack needs ~85 (got H=${best.innerBox.heightMm})`,
+);
+assert(
+  (best.innerBox.lengthMm === 240 && best.innerBox.widthMm === 160) ||
+    (best.innerBox.lengthMm === 160 && best.innerBox.widthMm === 240),
+  "best base is 240×160 family",
+);
+console.log("Dense best:", best.innerBox, "void%", Math.round(best.voidRatio * 100));
 
 assert(
-  sachets.layouts.every(
-    (l) =>
-      l.groupCount === 1 ||
-      DEFAULT_STACK_COUNTS.includes(l.groupCount as 2 | 4 | 6 | 8),
+  sachets.ranked.every(
+    (o) =>
+      Math.max(o.innerBox.lengthMm, o.innerBox.widthMm, o.innerBox.heightMm) <=
+      500,
   ),
-  "stacks mode only even group counts (or neat S=1 not in stacks preset)",
+  "no spaghetti alternatives (max side ≤500)",
 );
+assert(
+  sachets.ranked.every((o) => {
+    const sides = [
+      o.innerBox.lengthMm,
+      o.innerBox.widthMm,
+      o.innerBox.heightMm,
+    ].sort((a, b) => b - a);
+    return sides[0]! / Math.max(sides[2]!, 1) <= 5.01;
+  }),
+  "no extreme aspect-ratio alternatives",
+);
+
+assert(
+  sachets.ranked.every((o) => o.innerBox.lengthMm >= o.innerBox.widthMm - 0.05),
+  "Д×Ш: длина ≥ ширины на всех ranked",
+);
+
+// 150×105×3 → 240×160×160 (Д=240)
+const thick = recommendBoxes({
+  ...presetSachets(),
+  heightMm: 3,
+  occupiedVolumeLiters: null,
+});
+assert(
+  thick.selectedLayout.innerBox.lengthMm === 240 &&
+    thick.selectedLayout.innerBox.widthMm === 160 &&
+    thick.selectedLayout.innerBox.heightMm === 160,
+  `150×105×3 → 240×160×160 (got ${thick.selectedLayout.innerBox.lengthMm}×${thick.selectedLayout.innerBox.widthMm}×${thick.selectedLayout.innerBox.heightMm})`,
+);
+console.log("Thick 3mm:", thick.selectedLayout.innerBox);
 assert(
   sachets.layouts.every((l) => ![3, 5, 7].includes(l.groupCount)),
   "no odd stack counts 3/5/7",

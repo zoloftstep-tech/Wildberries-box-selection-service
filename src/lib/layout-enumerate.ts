@@ -329,9 +329,9 @@ function scoreLayout(args: {
   rotatedFromCanon: boolean;
   preferred: boolean;
   maxSideMm: number;
+  minSideMm: number;
   voidFill?: VoidFillInfo | null;
   underfillLiters?: number;
-  heightMatchesBase?: boolean;
   preferExactPallet?: boolean;
   maxVolumeUnderfillLiters?: number | null;
 }): number {
@@ -342,10 +342,9 @@ function scoreLayout(args: {
     rotatedFromCanon,
     preferred,
     maxSideMm,
+    minSideMm,
     voidFill,
-    underfillLiters = 0,
     preferExactPallet = true,
-    maxVolumeUnderfillLiters = null,
   } = args;
   let score = 0;
   if (pallet.exact) {
@@ -356,26 +355,24 @@ function scoreLayout(args: {
   } else {
     score += 120;
   }
-  score += voidRatio * 80;
-  score += underfillLiters * 12;
-  if (
-    maxVolumeUnderfillLiters != null &&
-    underfillLiters > maxVolumeUnderfillLiters + 0.05
-  ) {
-    score += 40;
-  }
+  // Геометрическая пустота (блок товара vs коробка) — главный штраф плотности
+  score += voidRatio * 120;
+  // occupiedVolumeLiters не влияет на score — только справка в UI
   if (!techOk) score += 8;
   if (rotatedFromCanon) score += 2;
   if (preferred) score -= 3;
   if (preferExactPallet && pallet.exact) score -= 12;
   else if (pallet.exact) score -= 6;
   if (voidFill) {
-    // Только разделитель штрафуем мягко; бока/высота сверх round — сильно
     score += voidFill.dividerMm * 0.04;
     score += voidFill.sideInsertLMm * 0.4 + voidFill.sideInsertWMm * 0.4;
-    score += voidFill.heightInsertMm * 0.15;
+    score += voidFill.heightInsertMm * 0.2;
   }
   score += maxSideMm / 1000;
+  // Отсев «лапши» 800×40 и подобных
+  const aspect = maxSideMm / Math.max(minSideMm, 1);
+  if (aspect > 4) score += (aspect - 4) * 25;
+  if (maxSideMm > 500) score += (maxSideMm - 500) * 0.15;
   return score;
 }
 
@@ -489,7 +486,6 @@ function buildCandidate(args: {
   forcedInner?: Dims;
   dividerMm?: number;
   preferExactPallet?: boolean;
-  maxVolumeUnderfillLiters?: number | null;
 }): LayoutCandidate {
   const {
     id,
@@ -512,12 +508,13 @@ function buildCandidate(args: {
     forcedInner,
     dividerMm = 0,
     preferExactPallet = true,
-    maxVolumeUnderfillLiters = null,
   } = args;
 
-  const innerBox =
+  const rawInner =
     forcedInner ??
     roundUpDims(addClearanceDims(productBlock, clearanceMm), roundStepMm);
+  // Канон подписи: длина ≥ ширины основания
+  const innerBox = normalizeBaseOrientation(rawInner);
   const outer =
     wallThicknessMm > 0
       ? {
@@ -534,14 +531,20 @@ function buildCandidate(args: {
     innerBox.heightMm,
   );
   const boxVol = volumeLiters(innerBox);
+  // Пустота = геометрия блока vs коробка (не заявленные литры россыпи)
+  const geomProductVol = volumeLiters(productBlock);
   const voidRatio =
-    boxVol > 0 ? Math.max(0, (boxVol - productVolumeLiters) / boxVol) : 1;
-  const underfillLiters = Math.max(0, productVolumeLiters - boxVol);
+    boxVol > 0 ? Math.max(0, (boxVol - geomProductVol) / boxVol) : 1;
   const rotatedFromCanon = !sameOrient(unitOrient, canon);
   const preferred = Boolean(
     preferredGroupCounts?.includes(groupCount) && groupCount > 1,
   );
   const maxSideMm = Math.max(
+    innerBox.lengthMm,
+    innerBox.widthMm,
+    innerBox.heightMm,
+  );
+  const minSideMm = Math.min(
     innerBox.lengthMm,
     innerBox.widthMm,
     innerBox.heightMm,
@@ -593,10 +596,9 @@ function buildCandidate(args: {
     rotatedFromCanon,
     preferred,
     maxSideMm,
+    minSideMm,
     voidFill,
-    underfillLiters,
     preferExactPallet,
-    maxVolumeUnderfillLiters,
   });
 
   const tags: LayoutTag[] = [];
@@ -741,9 +743,7 @@ function enumerateFlat(
   const maxH = input.maxStackHeightMm ?? null;
   const tEff = effectiveThicknessMm(input);
   const productVolumeLiters =
-    input.occupiedVolumeLiters != null && input.occupiedVolumeLiters > 0
-      ? input.occupiedVolumeLiters
-      : (input.lengthMm * input.widthMm * input.heightMm * qty) / 1_000_000;
+    (input.lengthMm * input.widthMm * input.heightMm * qty) / 1_000_000;
 
   let groupCounts =
     mode === "neat_stack" ? [1] : stackGroupCounts(input, qty);
@@ -766,7 +766,6 @@ function enumerateFlat(
   let seq = 0;
   const scoreOpts = {
     preferExactPallet: input.preferExactPallet !== false,
-    maxVolumeUnderfillLiters: input.maxVolumeUnderfillLiters ?? null,
   };
 
   for (const divider of dividers) {
@@ -855,14 +854,11 @@ function enumerateFlatLayers(
   const wall = input.wallThicknessMm ?? 0;
   const tEff = effectiveThicknessMm(input);
   const productVolumeLiters =
-    input.occupiedVolumeLiters != null && input.occupiedVolumeLiters > 0
-      ? input.occupiedVolumeLiters
-      : (input.lengthMm * input.widthMm * input.heightMm * qty) / 1_000_000;
+    (input.lengthMm * input.widthMm * input.heightMm * qty) / 1_000_000;
   const overlap =
     input.allowOverlap && (input.overlapMm ?? 0) > 0 ? input.overlapMm! : 0;
   const scoreOpts = {
     preferExactPallet: input.preferExactPallet !== false,
-    maxVolumeUnderfillLiters: input.maxVolumeUnderfillLiters ?? null,
   };
 
   const out: LayoutCandidate[] = [];
@@ -1114,7 +1110,6 @@ export function snapLayoutsToExactPallet(
       : null;
   const scoreOpts = {
     preferExactPallet: input.preferExactPallet !== false,
-    maxVolumeUnderfillLiters: input.maxVolumeUnderfillLiters ?? null,
   };
   const extra: LayoutCandidate[] = [];
 
@@ -1160,7 +1155,9 @@ export function snapLayoutsToExactPallet(
       reqH,
       baseL: base.lengthMm,
       baseW: base.widthMm,
-      maxHeightInsert: maxTechH,
+      // Не раздуваем H «ради техлимитов» — это создаёт 40%+ пустоты сверху.
+      // Тех-кандидат с подъёмом H остаётся только если fillHeightFromVolume.
+      maxHeightInsert: fillVol ? maxTechH : roundStep,
       roundStep,
       fillFromVolume: fillVol,
       liters,
@@ -1218,6 +1215,18 @@ export function snapLayoutsToExactPallet(
   return extra;
 }
 
+/** Отсечь непрактичные коробки (лапша 800×40, огромный maxSide). */
+export function isPracticalBox(box: Dims): boolean {
+  const sides = [box.lengthMm, box.widthMm, box.heightMm].sort(
+    (a, b) => b - a,
+  );
+  const maxS = sides[0]!;
+  const minS = sides[2]!;
+  if (maxS > 500) return false;
+  if (maxS / Math.max(minS, 1) > 5) return false;
+  return true;
+}
+
 /**
  * Полный перебор укладок → ranked (лучший + альтернативы).
  */
@@ -1266,7 +1275,6 @@ export function enumerateLayouts(
         tEff: u.heightMm,
         preferredGroupCounts: input.preferredGroupCounts,
         preferExactPallet: input.preferExactPallet !== false,
-        maxVolumeUnderfillLiters: input.maxVolumeUnderfillLiters ?? null,
       }),
     ];
   }
@@ -1275,19 +1283,35 @@ export function enumerateLayouts(
   const layouts = dedupeLayouts([...raw, ...snapped]);
   layouts.sort((a, b) => a.score - b.score);
 
-  const strong = layouts.filter(
+  const practical = layouts.filter((c) => isPracticalBox(c.innerBox));
+  const strong = practical.filter(
     (c) =>
       c.pallet.ok &&
       (c.pallet.exact || c.pallet.coverage >= OPTIMAL_PALLET_MIN_COVERAGE),
   );
-  const pool = strong.length > 0 ? strong : layouts;
-  const ranked = pool.slice(0, RANKED_LAYOUT_LIMIT).map((c, i) => ({
-    ...c,
-    tags: [
-      ...c.tags.filter((t) => t !== "best" && t !== "alt"),
-      (i === 0 ? "best" : "alt") as LayoutTag,
-    ],
-  }));
+  const pool = (strong.length > 0 ? strong : practical.length > 0 ? practical : layouts);
+
+  // Альтернативы: разные размеры / S, без почти-дублей
+  const ranked: LayoutCandidate[] = [];
+  const seenKey = new Set<string>();
+  for (const c of pool) {
+    const key = [
+      Math.round(c.innerBox.lengthMm / 5) * 5,
+      Math.round(c.innerBox.widthMm / 5) * 5,
+      Math.round(c.innerBox.heightMm / 5) * 5,
+      c.groupCount,
+    ].join("|");
+    if (seenKey.has(key)) continue;
+    seenKey.add(key);
+    ranked.push({
+      ...c,
+      tags: [
+        ...c.tags.filter((t) => t !== "best" && t !== "alt"),
+        (ranked.length === 0 ? "best" : "alt") as LayoutTag,
+      ],
+    });
+    if (ranked.length >= RANKED_LAYOUT_LIMIT) break;
+  }
 
   return { layouts, ranked };
 }
